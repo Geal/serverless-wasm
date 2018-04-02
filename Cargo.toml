@@ -1,0 +1,7 @@
+[package]
+name = "serverless-wasm"
+version = "0.1.0"
+authors = ["Geoffroy Couprie <geo.couprie@gmail.com>"]
+
+[dependencies]
+wasmi = "^0.1"
