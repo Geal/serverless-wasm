@@ -1,6 +1,7 @@
 extern crate parity_wasm;
 extern crate wasmi;
 extern crate rouille;
+extern crate slab;
 
 use std::env::args;
 

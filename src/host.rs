@@ -3,7 +3,11 @@
 use wasmi::*;
 use wasmi::memory_units::{Bytes, Pages};
 use std::str;
+use std::io::{Read,Write};
+use std::iter::repeat;
 use rouille::Response;
+use slab::Slab;
+use std::net::TcpStream;
 
 #[derive(Debug, Clone, PartialEq)]
 struct HostErrorWithCode {
@@ -38,6 +42,7 @@ pub struct TestHost {
     memory: Option<MemoryRef>,
     instance: Option<ModuleRef>,
     pub prepared_response: PreparedResponse,
+    connections: Slab<TcpStream>,
 }
 
 impl TestHost {
@@ -46,6 +51,7 @@ impl TestHost {
             memory: Some(MemoryInstance::alloc(Pages(3), Some(Pages(10))).unwrap()),
             instance: None,
             prepared_response: PreparedResponse::new(),
+            connections: Slab::new(),
         }
     }
 }
@@ -91,6 +97,9 @@ const LOG_INDEX: usize = 5;
 const RESPONSE_SET_STATUS_LINE: usize = 6;
 const RESPONSE_SET_HEADER: usize = 7;
 const RESPONSE_SET_BODY: usize = 8;
+const TCP_CONNECT: usize = 9;
+const TCP_READ: usize = 10;
+const TCP_WRITE: usize = 11;
 
 impl Externals for TestHost {
     fn invoke_index(
@@ -224,6 +233,49 @@ impl Externals for TestHost {
               self.prepared_response.body = Some(body);
               Ok(None)
             },
+            TCP_CONNECT => {
+              let ptr: u32 = args.nth(0);
+              let sz:  u64 = args.nth(1);
+              println!("got args ptr={}, sz={}", ptr, sz);
+
+              let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
+              println!("full memory size: {:?}", byte_size);
+              let memory = self.memory
+                .as_ref()
+                .expect("Function 'inc_mem' expects attached memory");
+              let v = memory.get(ptr, sz as usize).unwrap();
+              let address = String::from_utf8(v).unwrap();
+              let fd = self.connections.insert(TcpStream::connect(&address).unwrap());
+
+              Ok(Some(RuntimeValue::I32(fd as i32)))
+            },
+            TCP_READ => {
+              let fd: i32 = args.nth(0);
+              let ptr: u32 = args.nth(1);
+              let sz:  u64 = args.nth(2);
+              let mut v = Vec::with_capacity(sz as usize);
+              v.extend(repeat(0).take(sz as usize));
+              let sz = self.connections[fd as usize].read(&mut v).unwrap();
+              self.memory.as_ref().map(|m| m.set(ptr, &v[..sz]));
+
+
+              Ok(None)
+            },
+            TCP_WRITE => {
+              let fd: i32 = args.nth(0);
+              let ptr: u32 = args.nth(1);
+              let sz:  u64 = args.nth(2);
+
+              let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
+              let memory = self.memory
+                .as_ref()
+                .expect("Function 'inc_mem' expects attached memory");
+              let buf = memory.get(ptr, sz as usize).unwrap();
+
+              self.connections[fd as usize].write(&buf);
+
+              Ok(None)
+            },
             _ => panic!("env doesn't provide function at index {}", index),
         }
     }
@@ -249,6 +301,9 @@ impl TestHost {
             RESPONSE_SET_STATUS_LINE => (&[ValueType::I32, ValueType::I32, ValueType::I64], None),
             RESPONSE_SET_HEADER => (&[ValueType::I32, ValueType::I64, ValueType::I32, ValueType::I64], None),
             RESPONSE_SET_BODY => (&[ValueType::I32, ValueType::I64], None),
+            TCP_CONNECT => (&[ValueType::I32, ValueType::I64], Some(ValueType::I32)),
+            TCP_READ => (&[ValueType::I32, ValueType::I32, ValueType::I64], None),
+            TCP_WRITE => (&[ValueType::I32, ValueType::I32, ValueType::I64], None),
             _ => return false,
         };
 
@@ -268,6 +323,9 @@ impl ModuleImportResolver for TestHost {
             "response_set_status_line" => RESPONSE_SET_STATUS_LINE,
             "response_set_header" => RESPONSE_SET_HEADER,
             "response_set_body" => RESPONSE_SET_BODY,
+            "tcp_connect" => TCP_CONNECT,
+            "tcp_read" => TCP_READ,
+            "tcp_write" => TCP_WRITE,
             _ => {
                 return Err(Error::Instantiation(format!(
                     "Export {} not found",
