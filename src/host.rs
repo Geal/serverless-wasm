@@ -69,6 +69,9 @@ const RECURSE_FUNC_INDEX: usize = 4;
 /// requires attached memory.
 const LOG_INDEX: usize = 5;
 
+const RESPONSE_SET_STATUS_LINE: usize = 6;
+const RESPONSE_SET_HEADER: usize = 7;
+const RESPONSE_SET_BODY: usize = 8;
 
 impl Externals for TestHost {
     fn invoke_index(
@@ -149,6 +152,51 @@ impl Externals for TestHost {
               println!("log({} bytes):\n{:?}\n{}", v.len(), v, str::from_utf8(&v).unwrap());
               Ok(None)
             },
+            RESPONSE_SET_STATUS_LINE => {
+              let status: u32 = args.nth(0);
+              let ptr: u32 = args.nth(1);
+              let sz:  u64 = args.nth(2);
+
+              let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
+              let memory = self.memory
+                .as_ref()
+                .expect("Function 'inc_mem' expects attached memory");
+              let reason = memory.get(ptr, sz as usize).unwrap();
+
+              Ok(None)
+            },
+            RESPONSE_SET_HEADER => {
+              let ptr1: u32 = args.nth(0);
+              let sz1:  u64 = args.nth(1);
+              let ptr2: u32 = args.nth(2);
+              let sz2:  u64 = args.nth(3);
+              let header_name = {
+                let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
+                let memory = self.memory
+                  .as_ref()
+                  .expect("Function 'inc_mem' expects attached memory");
+                memory.get(ptr1, sz1 as usize).unwrap()
+              };
+              let header_value = {
+                let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
+                let memory = self.memory
+                  .as_ref()
+                  .expect("Function 'inc_mem' expects attached memory");
+                memory.get(ptr2, sz2 as usize).unwrap()
+              };
+              Ok(None)
+            },
+            RESPONSE_SET_BODY => {
+              let ptr: u32 = args.nth(0);
+              let sz:  u64 = args.nth(1);
+
+              let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
+              let memory = self.memory
+                .as_ref()
+                .expect("Function 'inc_mem' expects attached memory");
+              let body = memory.get(ptr, sz as usize).unwrap();
+              Ok(None)
+            },
             _ => panic!("env doesn't provide function at index {}", index),
         }
     }
@@ -171,6 +219,9 @@ impl TestHost {
             INC_MEM_FUNC_INDEX => (&[ValueType::I32], None),
             GET_MEM_FUNC_INDEX => (&[ValueType::I32], Some(ValueType::I32)),
             LOG_INDEX => (&[ValueType::I32, ValueType::I64], None),
+            RESPONSE_SET_STATUS_LINE => (&[ValueType::I32, ValueType::I32, ValueType::I64], None),
+            RESPONSE_SET_HEADER => (&[ValueType::I32, ValueType::I64, ValueType::I32, ValueType::I64], None),
+            RESPONSE_SET_BODY => (&[ValueType::I32, ValueType::I64], None),
             _ => return false,
         };
 
@@ -187,6 +238,9 @@ impl ModuleImportResolver for TestHost {
             "get_mem" => GET_MEM_FUNC_INDEX,
             "recurse" => RECURSE_FUNC_INDEX,
             "log" => LOG_INDEX,
+            "response_set_status_line" => RESPONSE_SET_STATUS_LINE,
+            "response_set_header" => RESPONSE_SET_HEADER,
+            "response_set_body" => RESPONSE_SET_BODY,
             _ => {
                 return Err(Error::Instantiation(format!(
                     "Export {} not found",
