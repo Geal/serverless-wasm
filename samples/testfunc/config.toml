@@ -1,0 +1,1 @@
+rustflags = ["-Clink-args=--import-memory"]

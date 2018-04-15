@@ -105,6 +105,7 @@ dependencies = [
 name = "serverless-wasm"
 version = "0.1.0"
 dependencies = [
+ "parity-wasm 0.27.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "wasmi 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 

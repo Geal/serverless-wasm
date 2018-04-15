@@ -1,9 +1,10 @@
 [package]
-name = "serverless-wasm"
+name = "testfunc"
 version = "0.1.0"
 authors = ["Geoffroy Couprie <geo.couprie@gmail.com>"]
 
-[dependencies]
-wasmi = "^0.1"
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib"]
 
-parity-wasm = "^0.27"
+[dependencies]
