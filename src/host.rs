@@ -3,6 +3,7 @@
 use wasmi::*;
 use wasmi::memory_units::{Bytes, Pages};
 use std::str;
+use rouille::Response;
 
 #[derive(Debug, Clone, PartialEq)]
 struct HostErrorWithCode {
@@ -17,9 +18,26 @@ impl ::std::fmt::Display for HostErrorWithCode {
 
 impl HostError for HostErrorWithCode {}
 
+pub struct PreparedResponse {
+  pub status_code: Option<u16>,
+  pub headers: Vec<(String, String)>,
+  pub body: Option<Vec<u8>>,
+}
+
+impl PreparedResponse {
+  pub fn new() -> PreparedResponse {
+    PreparedResponse {
+      status_code: None,
+      headers: Vec::new(),
+      body: None,
+    }
+  }
+}
+
 pub struct TestHost {
     memory: Option<MemoryRef>,
     instance: Option<ModuleRef>,
+    pub prepared_response: PreparedResponse,
 }
 
 impl TestHost {
@@ -27,6 +45,7 @@ impl TestHost {
         TestHost {
             memory: Some(MemoryInstance::alloc(Pages(3), Some(Pages(10))).unwrap()),
             instance: None,
+            prepared_response: PreparedResponse::new(),
         }
     }
 }
@@ -163,6 +182,8 @@ impl Externals for TestHost {
                 .expect("Function 'inc_mem' expects attached memory");
               let reason = memory.get(ptr, sz as usize).unwrap();
 
+              self.prepared_response.status_code = Some(status as u16);
+
               Ok(None)
             },
             RESPONSE_SET_HEADER => {
@@ -184,6 +205,11 @@ impl Externals for TestHost {
                   .expect("Function 'inc_mem' expects attached memory");
                 memory.get(ptr2, sz2 as usize).unwrap()
               };
+
+              self.prepared_response.headers.push((
+                String::from_utf8(header_name).unwrap(),
+                String::from_utf8(header_value).unwrap()
+              ));
               Ok(None)
             },
             RESPONSE_SET_BODY => {
@@ -195,6 +221,7 @@ impl Externals for TestHost {
                 .as_ref()
                 .expect("Function 'inc_mem' expects attached memory");
               let body = memory.get(ptr, sz as usize).unwrap();
+              self.prepared_response.body = Some(body);
               Ok(None)
             },
             _ => panic!("env doesn't provide function at index {}", index),

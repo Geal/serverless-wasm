@@ -9,7 +9,7 @@ extern {
 
 
 #[no_mangle]
-pub extern "C" fn test() {
+pub extern "C" fn handle() {
   let s = b"Hello world!";
   unsafe { log(s.as_ptr(), s.len() as u64) };
 
@@ -19,7 +19,7 @@ pub extern "C" fn test() {
     response_set_status_line(status, reason.as_ptr(), reason.len() as u64);
   };
 
-  let body = "Hello world";
+  let body = "Hello world from wasm!\n";
 
   let header_name = "Content-length";
   let header_value = body.len().to_string();

@@ -1,16 +1,57 @@
 use parity_wasm;
 use parity_wasm::elements::{External, FunctionType, Internal, Type, ValueType};
-use wasmi::{self,ImportsBuilder, ModuleInstance, NopExternals, RuntimeValue};
+use wasmi::{self,ImportsBuilder, Module, ModuleInstance, NopExternals, RuntimeValue};
+use rouille;
 
 use super::host;
 
-pub fn start(file:&str) {
-    let func_name = "test";
+pub fn server(file: &str) {
+    let module = load_module(file);
+    rouille::start_server("0.0.0.0:8080", move |request| {
+        let mut env = host::TestHost::new();
+        let main = ModuleInstance::new(&module, &ImportsBuilder::new().with_resolver("env", &env))
+          .expect("Failed to instantiate module")
+          .assert_no_start();
+
+        println!(
+            "Result: {:?}",
+            main.invoke_export("handle", &[], &mut env)
+        );
+
+        if let host::PreparedResponse {
+          status_code: Some(status), headers: headers, body: Some(body)
+        } = env.prepared_response {
+          rouille::Response {
+            status_code: status,
+            headers: Vec::new(),
+            data: rouille::ResponseBody::from_data(body),
+            upgrade: None,
+          }
+        } else {
+          rouille::Response::text("wasm failed").with_status_code(500)
+        }
+    });
+}
+
+pub fn start(file: &str) {
+    let module = load_module(file);
+    let mut env = host::TestHost::new();
+    let main = ModuleInstance::new(&module, &ImportsBuilder::new().with_resolver("env", &env))
+      .expect("Failed to instantiate module")
+      .assert_no_start();
+
+    println!(
+        "Result: {:?}",
+        main.invoke_export("handle", &[], &mut env)
+    );
+}
+
+pub fn load_module(file:&str) -> Module {
+    let func_name = "handle";
     //let (_, program_args) = args.split_at(3);
 
     let module = parity_wasm::deserialize_file(file).expect("File to be deserialized");
 
-    
     // Extracts call arguments from command-line arguments
     let args = {
         // Export section has an entry with a func_name with an index inside a module
@@ -96,32 +137,7 @@ pub fn start(file:&str) {
     };
 
 
-    let loaded_module = wasmi::Module::from_parity_wasm_module(module).expect("Module to be valid");
-
-    // Intialize deserialized module. It adds module into It expects 3 parameters:
-    // - a name for the module
-    // - a module declaration
-    // - "main" module doesn't import native module(s) this is why we don't need to provide external native modules here
-    // This test shows how to implement native module https://github.com/NikVolf/parity-wasm/blob/master/src/interpreter/tests/basics.rs#L197
-    /*
-    let main = ModuleInstance::new(&loaded_module, &ImportsBuilder::default())
-        .expect("Failed to instantiate module")
-        .run_start(&mut NopExternals)
-        .expect("Failed to run start function in module");
-
-    println!(
-        "Result: {:?}",
-        main.invoke_export(func_name, &args, &mut NopExternals)
-            .expect("")
-    );
-    */
-    let mut env = host::TestHost::new();
-    let main = ModuleInstance::new(&loaded_module, &ImportsBuilder::new().with_resolver("env", &env))
-      .expect("Failed to instantiate module")
-      .assert_no_start();
-
-    println!(
-        "Result: {:?}",
-        main.invoke_export("test", &[], &mut env)
-    );
+    wasmi::Module::from_parity_wasm_module(module).expect("Module to be valid")
 }
+
+

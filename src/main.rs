@@ -1,5 +1,6 @@
 extern crate parity_wasm;
 extern crate wasmi;
+extern crate rouille;
 
 use std::env::args;
 
@@ -17,5 +18,5 @@ fn main() {
     }
     */
 
-    vm::start(&args[1]);
+    vm::server(&args[1]);
 }
