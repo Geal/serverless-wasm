@@ -101,9 +101,6 @@ You can build and launch the server as follows:
 cargo build && ./target/debug/serverless-wasm ./samples/config.toml
 ```
 
-
-
-
 ## Current features
 
 - [x] load web assembly file to handle requests
@@ -115,3 +112,11 @@ cargo build && ./target/debug/serverless-wasm ./samples/config.toml
 - [ ] asynchronous event loop to receive connections and handle backend TCP connections
 - [ ] file system abstraction (loading files from S3 or other providers?)
 - [ ] set up initial state via "environment variables"
+- [ ] "standard API" for functions exported by the VM
+
+## Prior art
+
+While I was building this, I heard of [IceCore](https://github.com/losfair/IceCore),
+which looks quite cool, with JIT support, etc.
+It's quite nice to see multiple platforms attempting this. Maybe we'll be able to
+agree onthe "web assembly standard API" so WASM apps can run on any of those :)
