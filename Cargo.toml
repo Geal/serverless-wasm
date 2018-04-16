@@ -1,6 +1,9 @@
 [package]
 name = "serverless-wasm"
 version = "0.1.0"
+license = "MIT"
+repository = "https://github.com/Geal/serverless-wasm"
+readme = "README.md"
 authors = ["Geoffroy Couprie <geo.couprie@gmail.com>"]
 
 [dependencies]
