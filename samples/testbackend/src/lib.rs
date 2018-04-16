@@ -23,7 +23,16 @@ pub extern "C" fn handle() {
     response_set_status_line(status, reason.as_ptr(), reason.len() as u64);
   };
 
-  let body = "Hello world from wasm!\n";
+  let addr = "127.0.0.1:8181";
+  let backend = unsafe { tcp_connect(addr.as_ptr(), addr.len() as u64) };
+
+  let backend_msg = "hello\n";
+  unsafe { tcp_write(backend, backend_msg.as_ptr(), backend_msg.len() as u64) };
+
+  let mut res: [u8; 100] = [0u8; 100];
+  unsafe { tcp_read(backend, res.as_mut_ptr(), res.len() as u64) };
+
+  let body = format!("Hello world from wasm!\nanswer from backend:\n{}\n", str::from_utf8(&res[..]).unwrap());
 
   let header_name = "Content-length";
   let header_value = body.len().to_string();

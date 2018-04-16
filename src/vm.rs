@@ -2,33 +2,49 @@ use parity_wasm;
 use parity_wasm::elements::{External, FunctionType, Internal, Type, ValueType};
 use wasmi::{self,ImportsBuilder, Module, ModuleInstance, NopExternals, RuntimeValue};
 use rouille;
+use std::collections::HashMap;
 
 use super::host;
+use config::Config;
 
-pub fn server(file: &str) {
-    let module = load_module(file);
-    rouille::start_server("0.0.0.0:8080", move |request| {
-        let mut env = host::TestHost::new();
-        let main = ModuleInstance::new(&module, &ImportsBuilder::new().with_resolver("env", &env))
-          .expect("Failed to instantiate module")
-          .assert_no_start();
+fn generate_state(config: &Config) -> HashMap<(String, String), Module> {
+  config.applications.iter().map(|app| {
+    (
+      (app.method.clone(), app.url_path.clone()),
+      load_module(&app.file_path)
+    )
+  }).collect()
+}
 
-        println!(
-            "Result: {:?}",
-            main.invoke_export("handle", &[], &mut env)
-        );
+pub fn server(config: Config) {
+    let state = generate_state(&config);
 
-        if let host::PreparedResponse {
-          status_code: Some(status), headers: headers, body: Some(body)
-        } = env.prepared_response {
-          rouille::Response {
-            status_code: status,
-            headers: Vec::new(),
-            data: rouille::ResponseBody::from_data(body),
-            upgrade: None,
+    rouille::start_server(&config.listen_address, move |request| {
+        if let Some(module) = state.get(&(request.method().to_string(), request.url())) {
+          let mut env = host::TestHost::new();
+          let main = ModuleInstance::new(&module, &ImportsBuilder::new().with_resolver("env", &env))
+            .expect("Failed to instantiate module")
+            .assert_no_start();
+
+          println!(
+              "Result: {:?}",
+              main.invoke_export("handle", &[], &mut env)
+          );
+
+          if let host::PreparedResponse {
+            status_code: Some(status), headers: headers, body: Some(body)
+          } = env.prepared_response {
+            rouille::Response {
+              status_code: status,
+              headers: Vec::new(),
+              data: rouille::ResponseBody::from_data(body),
+              upgrade: None,
+            }
+          } else {
+            rouille::Response::text("wasm failed").with_status_code(500)
           }
         } else {
-          rouille::Response::text("wasm failed").with_status_code(500)
+          rouille::Response::empty_404()
         }
     });
 }

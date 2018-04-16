@@ -2,6 +2,9 @@ extern crate parity_wasm;
 extern crate wasmi;
 extern crate rouille;
 extern crate slab;
+extern crate toml;
+#[macro_use]
+extern crate serde_derive;
 
 use std::env::args;
 
@@ -10,14 +13,18 @@ use wasmi::{ImportsBuilder, ModuleInstance, NopExternals, RuntimeValue};
 
 mod host;
 mod vm;
+mod config;
 
 fn main() {
     let args: Vec<_> = args().collect();
-    /*if args.len() < 3 {
-        println!("Usage: {} <wasm file> <exported func> [<arg>...]", args[0]);
+    if args.len() != 2 {
+        println!("Usage: {} <config_file>", args[0]);
         return;
     }
-    */
 
-    vm::server(&args[1]);
+    if let Some(config) = config::load(&args[1]) {
+      vm::server(config);
+    } else {
+      println!("invalid configuration");
+    }
 }
