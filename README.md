@@ -69,8 +69,8 @@ extern {
   fn response_set_body(ptr: *const u8, size: u64);
 
   fn tcp_connect(ptr: *const u8, size: u64) -> i32;
-  fn tcp_read(fd: i32, ptr: *mut u8, size: u64);
-  fn tcp_write(fd: i32, ptr: *const u8, size: u64);
+  fn tcp_read(fd: i32, ptr: *mut u8, size: u64) -> i64;
+  fn tcp_write(fd: i32, ptr: *const u8, size: u64) -> i64;
 }
 ```
 

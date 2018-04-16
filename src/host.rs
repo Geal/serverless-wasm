@@ -245,9 +245,13 @@ impl Externals for TestHost {
                 .expect("Function 'inc_mem' expects attached memory");
               let v = memory.get(ptr, sz as usize).unwrap();
               let address = String::from_utf8(v).unwrap();
-              let fd = self.connections.insert(TcpStream::connect(&address).unwrap());
+              if let Ok(socket) = TcpStream::connect(&address) {
+                let fd = self.connections.insert(socket);
+                Ok(Some(RuntimeValue::I32(fd as i32)))
+              } else {
+                Ok(Some(RuntimeValue::I32(-1)))
+              }
 
-              Ok(Some(RuntimeValue::I32(fd as i32)))
             },
             TCP_READ => {
               let fd: i32 = args.nth(0);
@@ -255,11 +259,13 @@ impl Externals for TestHost {
               let sz:  u64 = args.nth(2);
               let mut v = Vec::with_capacity(sz as usize);
               v.extend(repeat(0).take(sz as usize));
-              let sz = self.connections[fd as usize].read(&mut v).unwrap();
-              self.memory.as_ref().map(|m| m.set(ptr, &v[..sz]));
+              if let Ok(sz) = self.connections[fd as usize].read(&mut v) {
+                self.memory.as_ref().map(|m| m.set(ptr, &v[..sz]));
 
-
-              Ok(None)
+                Ok(Some(RuntimeValue::I64(sz as i64)))
+              } else {
+                Ok(Some(RuntimeValue::I64(-1)))
+              }
             },
             TCP_WRITE => {
               let fd: i32 = args.nth(0);
@@ -272,9 +278,11 @@ impl Externals for TestHost {
                 .expect("Function 'inc_mem' expects attached memory");
               let buf = memory.get(ptr, sz as usize).unwrap();
 
-              self.connections[fd as usize].write(&buf);
-
-              Ok(None)
+              if let Ok(sz) = self.connections[fd as usize].write(&buf) {
+                Ok(Some(RuntimeValue::I64(sz as i64)))
+              } else {
+                Ok(Some(RuntimeValue::I64(-1)))
+              }
             },
             _ => panic!("env doesn't provide function at index {}", index),
         }
@@ -302,8 +310,8 @@ impl TestHost {
             RESPONSE_SET_HEADER => (&[ValueType::I32, ValueType::I64, ValueType::I32, ValueType::I64], None),
             RESPONSE_SET_BODY => (&[ValueType::I32, ValueType::I64], None),
             TCP_CONNECT => (&[ValueType::I32, ValueType::I64], Some(ValueType::I32)),
-            TCP_READ => (&[ValueType::I32, ValueType::I32, ValueType::I64], None),
-            TCP_WRITE => (&[ValueType::I32, ValueType::I32, ValueType::I64], None),
+            TCP_READ => (&[ValueType::I32, ValueType::I32, ValueType::I64], Some(ValueType::I64)),
+            TCP_WRITE => (&[ValueType::I32, ValueType::I32, ValueType::I64], Some(ValueType::I64)),
             _ => return false,
         };
 
