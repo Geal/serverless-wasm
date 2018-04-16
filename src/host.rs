@@ -79,16 +79,14 @@ impl Externals for TestHost {
             LOG_INDEX => {
               let ptr: u32 = args.nth(0);
               let sz:  u64 = args.nth(1);
-              println!("got args ptr={}, sz={}", ptr, sz);
 
               let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
-              println!("full memory size: {:?}", byte_size);
               let memory = self.memory
                 .as_ref()
                 .expect("Function 'inc_mem' expects attached memory");
               let v = memory.get(ptr, sz as usize).unwrap();
 
-              println!("log({} bytes):\n{:?}\n{}", v.len(), v, str::from_utf8(&v).unwrap());
+              println!("log({} bytes): {}", v.len(), str::from_utf8(&v).unwrap());
               Ok(None)
             },
             RESPONSE_SET_STATUS_LINE => {
@@ -147,10 +145,8 @@ impl Externals for TestHost {
             TCP_CONNECT => {
               let ptr: u32 = args.nth(0);
               let sz:  u64 = args.nth(1);
-              println!("got args ptr={}, sz={}", ptr, sz);
 
               let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
-              println!("full memory size: {:?}", byte_size);
               let memory = self.memory
                 .as_ref()
                 .expect("Function 'inc_mem' expects attached memory");
@@ -252,15 +248,15 @@ impl ModuleImportResolver for TestHost {
     ) -> Result<MemoryRef, Error> {
       let Pages(initial1) = self.memory.as_ref().map(|m| m.initial()).unwrap();
       let initial2 = _memory_type.initial() as usize;
-      println!("requested {} pages", initial2);
+      //println!("requested {} pages", initial2);
       if initial2 > initial1 {
         self.memory.as_ref().map(|m| {
-          println!("grow res: {:?}", m.grow(Pages(initial2 - initial1)).unwrap());
+          //println!("grow res: {:?}", m.grow(Pages(initial2 - initial1)).unwrap());
         });
       }
       let Pages(initial) = self.memory.as_ref().map(|m| m.current_size()).unwrap();
-      println!("current number of pages: {}", initial);
-      println!("resolving memory at name: {}", field_name);
+      //println!("current number of pages: {}", initial);
+      //println!("resolving memory at name: {}", field_name);
       let res = self.memory.as_ref().unwrap().clone();
 
       Ok(res)

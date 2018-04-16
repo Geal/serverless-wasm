@@ -17,14 +17,9 @@ pub struct Config {
 
 pub fn load(file: &str) -> Option<Config> {
   if let Ok(mut file) = File::open(file) {
-    println!("opened");
     let mut contents = String::new();
     if let Ok(_) = file.read_to_string(&mut contents) {
-      println!("read:\n{}", contents);
-      let res = toml::from_str(&contents);
-      println!("res:\n{:#?}", res);
-      //return toml::from_str(&contents).ok()
-      return res.ok();
+      return toml::from_str(&contents).ok()
     }
   }
   None

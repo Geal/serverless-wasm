@@ -27,7 +27,7 @@ pub fn server(config: Config) {
             .assert_no_start();
 
           println!(
-              "Result: {:?}",
+              "invocation result: {:?}",
               main.invoke_export("handle", &[], &mut env)
           );
 
@@ -99,7 +99,7 @@ pub fn load_module(file:&str) -> Module {
             Some(import) => import
                 .entries()
                 .iter().map(|entry| {
-                  println!("importing entry {:?}", entry);
+                  //println!("importing entry {:?}", entry);
                   entry
                 })
                 .filter(|entry| match entry.external() {
