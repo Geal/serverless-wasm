@@ -50,13 +50,68 @@ some function that it can use for logging, to build a response and connect to
 other servers, and handle requests using that wasm file (as long as it exports
 a "handle" function).
 
+## How to run it
+
+### Requirements for WASM applications
+
+the WASM application must export a `handle` function that takes no arguments and
+returns no arguments.
+
+The virtual machine currently exposes the following functions, that you can use
+to build your response:
+
+```rust
+extern {
+  fn log(ptr: *const u8, size: u64);
+
+  fn response_set_status_line(status: u32, ptr: *const u8, size: u64);
+  fn response_set_header(name_ptr: *const u8, name_size: u64, value_ptr: *const u8, value_size: u64);
+  fn response_set_body(ptr: *const u8, size: u64);
+
+  fn tcp_connect(ptr: *const u8, size: u64) -> i32;
+  fn tcp_read(fd: i32, ptr: *mut u8, size: u64);
+  fn tcp_write(fd: i32, ptr: *const u8, size: u64);
+}
+```
+
+### Configuration file
+
+You define which WASM binary will handle which requests through a TOML configuration
+file:
+
+```toml
+listen_address = "127.0.0.1:8080"
+
+[[applications]]
+file_path = "./samples/testfunc.wasm"
+method = "GET"
+url_path = "/hello"
+
+[[applications]]
+file_path = "./samples/testbackend.wasm"
+method = "GET"
+url_path = "/backend"
+```
+
+### Running it
+
+You can build and launch the server as follows:
+
+```rust
+cargo build && ./target/debug/serverless-wasm ./samples/config.toml
+```
+
+
+
+
 ## Current features
 
 - [x] load web assembly file to handle requests
 - [x] logging function available from WASM
 - [x] API to build a response from WASM
 - [x] (blocking) TCP connections to backend servers or databases
-- [ ] routing to mutiple apps depending on the request
+- [x] routing to mutiple apps depending on the request
+- [ ] proper error handling (the server will panic even if you give it the side eye)
 - [ ] asynchronous event loop to receive connections and handle backend TCP connections
 - [ ] file system abstraction (loading files from S3 or other providers?)
 - [ ] set up initial state via "environment variables"
