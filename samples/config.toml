@@ -4,8 +4,16 @@ listen_address = "127.0.0.1:8080"
 file_path = "./samples/testfunc.wasm"
 method = "GET"
 url_path = "/hello"
+function = "hello"
+
+[[applications]]
+file_path = "./samples/testfunc.wasm"
+method = "GET"
+url_path = "/bonjour"
+function = "bonjour"
 
 [[applications]]
 file_path = "./samples/testbackend.wasm"
 method = "GET"
 url_path = "/backend"
+function = "handle"

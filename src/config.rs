@@ -7,6 +7,7 @@ pub struct WasmApp {
   pub file_path: String,
   pub method: String,
   pub url_path: String,
+  pub function: String,
 }
 
 #[derive(Deserialize,Debug)]

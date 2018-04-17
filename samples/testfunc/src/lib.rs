@@ -13,7 +13,7 @@ extern {
 
 
 #[no_mangle]
-pub extern "C" fn handle() {
+pub extern "C" fn hello() {
   let s = b"Hello world!";
   unsafe { log(s.as_ptr(), s.len() as u64) };
 
@@ -24,6 +24,31 @@ pub extern "C" fn handle() {
   };
 
   let body = "Hello world from wasm!\n";
+
+  let header_name = "Content-length";
+  let header_value = body.len().to_string();
+
+  unsafe {
+    response_set_header(header_name.as_ptr(), header_name.len() as u64, header_value.as_ptr(), header_value.len() as u64);
+  };
+
+  unsafe {
+    response_set_body(body.as_ptr(), body.len() as u64);
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn bonjour() {
+  let s = b"Bonjour tout le monde!";
+  unsafe { log(s.as_ptr(), s.len() as u64) };
+
+  let status = 200;
+  let reason = "Ok";
+  unsafe {
+    response_set_status_line(status, reason.as_ptr(), reason.len() as u64);
+  };
+
+  let body = "Bonjour tout le monde depuis le monde merveilleux de WASM!\n";
 
   let header_name = "Content-length";
   let header_value = body.len().to_string();

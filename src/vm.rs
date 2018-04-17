@@ -7,11 +7,11 @@ use std::collections::HashMap;
 use super::host;
 use config::Config;
 
-fn generate_state(config: &Config) -> HashMap<(String, String), Module> {
+fn generate_state(config: &Config) -> HashMap<(String, String), (String, Module)> {
   config.applications.iter().map(|app| {
     (
       (app.method.clone(), app.url_path.clone()),
-      load_module(&app.file_path)
+      (app.function.clone(), load_module(&app.file_path, &app.function))
     )
   }).collect()
 }
@@ -20,7 +20,7 @@ pub fn server(config: Config) {
     let state = generate_state(&config);
 
     rouille::start_server(&config.listen_address, move |request| {
-        if let Some(module) = state.get(&(request.method().to_string(), request.url())) {
+        if let Some((func_name, module)) = state.get(&(request.method().to_string(), request.url())) {
           let mut env = host::TestHost::new();
           let main = ModuleInstance::new(&module, &ImportsBuilder::new().with_resolver("env", &env))
             .expect("Failed to instantiate module")
@@ -28,7 +28,7 @@ pub fn server(config: Config) {
 
           println!(
               "invocation result: {:?}",
-              main.invoke_export("handle", &[], &mut env)
+              main.invoke_export(func_name, &[], &mut env)
           );
 
           if let host::PreparedResponse {
@@ -50,7 +50,7 @@ pub fn server(config: Config) {
 }
 
 pub fn start(file: &str) {
-    let module = load_module(file);
+    let module = load_module(file, "handle");
     let mut env = host::TestHost::new();
     let main = ModuleInstance::new(&module, &ImportsBuilder::new().with_resolver("env", &env))
       .expect("Failed to instantiate module")
@@ -62,10 +62,7 @@ pub fn start(file: &str) {
     );
 }
 
-pub fn load_module(file:&str) -> Module {
-    let func_name = "handle";
-    //let (_, program_args) = args.split_at(3);
-
+pub fn load_module(file:&str, func_name: &str) -> Module {
     let module = parity_wasm::deserialize_file(file).expect("File to be deserialized");
 
     // Extracts call arguments from command-line arguments
