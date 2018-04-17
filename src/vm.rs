@@ -7,20 +7,51 @@ use std::collections::HashMap;
 use super::host;
 use config::Config;
 
-fn generate_state(config: &Config) -> HashMap<(String, String), (String, Module)> {
-  config.applications.iter().map(|app| {
-    (
-      (app.method.clone(), app.url_path.clone()),
-      (app.function.clone(), load_module(&app.file_path, &app.function))
-    )
-  }).collect()
+pub struct ApplicationState {
+  /// (method, url path) -> (function name, module path)
+  pub routes: HashMap<(String, String), (String, String)>,
+  /// module path -> Module
+  pub modules: HashMap<String, Module>,
+}
+
+impl ApplicationState {
+  pub fn new(config: &Config) -> ApplicationState {
+    let mut routes  = HashMap::new();
+    let mut modules = HashMap::new();
+
+    for app in config.applications.iter() {
+      //FIXME: it might be good to not panic when we don't find the function in the module
+      let module = load_module(&app.file_path, &app.function);
+
+      if !modules.contains_key(&app.file_path) {
+        modules.insert(app.file_path.clone(), module);
+      }
+
+      routes.insert((app.method.clone(), app.url_path.clone()), (app.function.clone(), app.file_path.clone()));
+    }
+
+    ApplicationState {
+      routes:  routes,
+      modules: modules,
+    }
+  }
+
+  pub fn route(&self, method: &str, url: &str) -> Option<(&str, &Module)> {
+    if let Some((func_name, module_path)) = self.routes.get(&(method.to_string(), url.to_string())) {
+      if let Some(module) = self.modules.get(module_path) {
+        return Some((func_name, module));
+      }
+    }
+
+    None
+  }
 }
 
 pub fn server(config: Config) {
-    let state = generate_state(&config);
+    let state = ApplicationState::new(&config);
 
     rouille::start_server(&config.listen_address, move |request| {
-        if let Some((func_name, module)) = state.get(&(request.method().to_string(), request.url())) {
+        if let Some((func_name, module)) = state.route(request.method(), &request.url()) {
           let mut env = host::TestHost::new();
           let main = ModuleInstance::new(&module, &ImportsBuilder::new().with_resolver("env", &env))
             .expect("Failed to instantiate module")
