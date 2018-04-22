@@ -17,3 +17,4 @@ file_path = "./samples/testbackend.wasm"
 method = "GET"
 url_path = "/backend"
 function = "handle"
+env = { "/env/backend"= "127.0.0.1:8181"}
