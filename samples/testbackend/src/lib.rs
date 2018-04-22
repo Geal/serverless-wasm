@@ -9,6 +9,7 @@ extern {
   fn tcp_connect(ptr: *const u8, size: u64) -> i32;
   fn tcp_read(fd: i32, ptr: *mut u8, size: u64) -> i64;
   fn tcp_write(fd: i32, ptr: *const u8, size: u64) -> i64;
+  fn db_get(key_ptr: *const u8, key_size: u64, value_ptr: *const u8, value_size: u64) -> i64;
 }
 
 
@@ -25,11 +26,30 @@ pub extern "C" fn handle() {
 
   let mut body = String::new();
 
-  let addr = "127.0.0.1:8181";
-  let backend = unsafe { tcp_connect(addr.as_ptr(), addr.len() as u64) };
+  let addr_key = b"/env/backend";
+  let mut addr: [u8; 100] = [0u8; 100];
+  let read_sz = unsafe { db_get(addr_key.as_ptr(), addr_key.len() as u64, addr.as_mut_ptr(), addr.len() as u64) };
+  if read_sz < 0 {
+    let body = format!("could not get value for key {}", str::from_utf8(addr_key).unwrap());
+    unsafe { log(body.as_ptr(), body.len() as u64) };
+
+    let header_name = "Content-length";
+    let header_value = body.len().to_string();
+
+    unsafe {
+      response_set_header(header_name.as_ptr(), header_name.len() as u64, header_value.as_ptr(), header_value.len() as u64);
+    };
+
+    unsafe {
+      response_set_body(body.as_ptr(), body.len() as u64);
+    }
+    return;
+  }
+  //let addr = "127.0.0.1:8181";
+  let backend = unsafe { tcp_connect(addr.as_ptr(), read_sz as u64) };
 
   if backend == -1 {
-    body = format!("could not connect to backend address: {:?}\n", addr);
+    body = format!("could not connect to backend address: {:?}\n", str::from_utf8(&addr[..read_sz as usize]));
     unsafe { log(body.as_ptr(), body.len() as u64) };
   } else {
     let backend_msg = "hello\n";

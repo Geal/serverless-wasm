@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::Read;
+use std::collections::HashMap;
 use toml;
 
 #[derive(Deserialize,Debug)]
@@ -8,6 +9,7 @@ pub struct WasmApp {
   pub method: String,
   pub url_path: String,
   pub function: String,
+  pub env: Option<HashMap<String, String>>,
 }
 
 #[derive(Deserialize,Debug)]
@@ -20,7 +22,10 @@ pub fn load(file: &str) -> Option<Config> {
   if let Ok(mut file) = File::open(file) {
     let mut contents = String::new();
     if let Ok(_) = file.read_to_string(&mut contents) {
-      return toml::from_str(&contents).ok()
+      return toml::from_str(&contents).map_err(|e| {
+        println!("configuration deserialization error: {:?}", e);
+        e
+      }).ok()
     }
   }
   None

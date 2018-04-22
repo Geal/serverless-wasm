@@ -8,8 +8,8 @@ use super::host;
 use config::Config;
 
 pub struct ApplicationState {
-  /// (method, url path) -> (function name, module path)
-  pub routes: HashMap<(String, String), (String, String)>,
+  /// (method, url path) -> (function name, module path, env)
+  pub routes: HashMap<(String, String), (String, String, Option<HashMap<String, String>>)>,
   /// module path -> Module
   pub modules: HashMap<String, Module>,
 }
@@ -27,7 +27,7 @@ impl ApplicationState {
         modules.insert(app.file_path.clone(), module);
       }
 
-      routes.insert((app.method.clone(), app.url_path.clone()), (app.function.clone(), app.file_path.clone()));
+      routes.insert((app.method.clone(), app.url_path.clone()), (app.function.clone(), app.file_path.clone(), app.env.clone()));
     }
 
     ApplicationState {
@@ -36,10 +36,10 @@ impl ApplicationState {
     }
   }
 
-  pub fn route(&self, method: &str, url: &str) -> Option<(&str, &Module)> {
-    if let Some((func_name, module_path)) = self.routes.get(&(method.to_string(), url.to_string())) {
+  pub fn route(&self, method: &str, url: &str) -> Option<(&str, &Module, &Option<HashMap<String, String>>)> {
+    if let Some((func_name, module_path, ref opt_env)) = self.routes.get(&(method.to_string(), url.to_string())) {
       if let Some(module) = self.modules.get(module_path) {
-        return Some((func_name, module));
+        return Some((func_name, module, opt_env));
       }
     }
 
@@ -51,8 +51,11 @@ pub fn server(config: Config) {
     let state = ApplicationState::new(&config);
 
     rouille::start_server(&config.listen_address, move |request| {
-        if let Some((func_name, module)) = state.route(request.method(), &request.url()) {
+        if let Some((func_name, module, ref opt_env)) = state.route(request.method(), &request.url()) {
           let mut env = host::TestHost::new();
+          if let Some(h) = opt_env {
+            env.db.extend(h.iter().map(|(ref k, ref v)| (k.to_string(), v.to_string())));
+          }
           let main = ModuleInstance::new(&module, &ImportsBuilder::new().with_resolver("env", &env))
             .expect("Failed to instantiate module")
             .assert_no_start();

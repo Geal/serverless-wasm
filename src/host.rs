@@ -3,6 +3,7 @@
 use wasmi::*;
 use wasmi::memory_units::{Bytes, Pages};
 use std::str;
+use std::collections::HashMap;
 use std::io::{Read,Write};
 use std::iter::repeat;
 use rouille::Response;
@@ -43,6 +44,7 @@ pub struct TestHost {
     instance: Option<ModuleRef>,
     pub prepared_response: PreparedResponse,
     connections: Slab<TcpStream>,
+    pub db: HashMap<String, String>,
 }
 
 impl TestHost {
@@ -52,6 +54,7 @@ impl TestHost {
             instance: None,
             prepared_response: PreparedResponse::new(),
             connections: Slab::new(),
+            db: HashMap::new(),
         }
     }
 }
@@ -68,6 +71,7 @@ const RESPONSE_SET_BODY: usize = 3;
 const TCP_CONNECT: usize = 4;
 const TCP_READ: usize = 5;
 const TCP_WRITE: usize = 6;
+const DB_GET: usize = 7;
 
 impl Externals for TestHost {
     fn invoke_index(
@@ -134,7 +138,6 @@ impl Externals for TestHost {
               let ptr: u32 = args.nth(0);
               let sz:  u64 = args.nth(1);
 
-              let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
               let memory = self.memory
                 .as_ref()
                 .expect("Function 'inc_mem' expects attached memory");
@@ -146,7 +149,6 @@ impl Externals for TestHost {
               let ptr: u32 = args.nth(0);
               let sz:  u64 = args.nth(1);
 
-              let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
               let memory = self.memory
                 .as_ref()
                 .expect("Function 'inc_mem' expects attached memory");
@@ -179,7 +181,6 @@ impl Externals for TestHost {
               let ptr: u32 = args.nth(1);
               let sz:  u64 = args.nth(2);
 
-              let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
               let memory = self.memory
                 .as_ref()
                 .expect("Function 'inc_mem' expects attached memory");
@@ -189,6 +190,31 @@ impl Externals for TestHost {
                 Ok(Some(RuntimeValue::I64(sz as i64)))
               } else {
                 Ok(Some(RuntimeValue::I64(-1)))
+              }
+            },
+            DB_GET => {
+              let key_ptr:   u32 = args.nth(0);
+              let key_sz:    u64 = args.nth(1);
+              let value_ptr: u32 = args.nth(2);
+              let value_sz:  u64 = args.nth(3);
+
+              let memory = self.memory
+                .as_ref()
+                .expect("Function 'inc_mem' expects attached memory");
+              let v = memory.get(key_ptr, key_sz as usize).unwrap();
+              let key = String::from_utf8(v).unwrap();
+              println!("requested value for key {}", key);
+
+              match self.db.get(&key) {
+                None => Ok(Some(RuntimeValue::I64(-1))),
+                Some(value) => {
+                  if value.len() > value_sz as usize {
+                    Ok(Some(RuntimeValue::I64(-2)))
+                  } else {
+                    self.memory.as_ref().map(|m| m.set(value_ptr, value.as_bytes()));
+                    Ok(Some(RuntimeValue::I64(value.len() as i64)))
+                  }
+                }
               }
             },
             _ => panic!("env doesn't provide function at index {}", index),
@@ -206,6 +232,7 @@ impl TestHost {
             TCP_CONNECT => (&[ValueType::I32, ValueType::I64], Some(ValueType::I32)),
             TCP_READ => (&[ValueType::I32, ValueType::I32, ValueType::I64], Some(ValueType::I64)),
             TCP_WRITE => (&[ValueType::I32, ValueType::I32, ValueType::I64], Some(ValueType::I64)),
+            DB_GET => (&[ ValueType::I32, ValueType::I64, ValueType::I32, ValueType::I64], Some(ValueType::I64)),
             _ => return false,
         };
 
@@ -223,6 +250,7 @@ impl ModuleImportResolver for TestHost {
             "tcp_connect" => TCP_CONNECT,
             "tcp_read" => TCP_READ,
             "tcp_write" => TCP_WRITE,
+            "db_get" => DB_GET,
             _ => {
                 return Err(Error::Instantiation(format!(
                     "Export {} not found",
