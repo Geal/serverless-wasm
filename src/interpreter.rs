@@ -1,24 +1,27 @@
-use wasmi::{Externals,Interpreter,FuncRef,FunctionContext,RuntimeValue,Trap,FuncInstance,RunResult,BlockFrameType};
+use wasmi::{Externals, Error, Interpreter,FuncRef,FunctionContext,RuntimeValue,Trap,FuncInstance,RunResult,BlockFrameType};
 use std::collections::VecDeque;
 
 pub const DEFAULT_VALUE_STACK_LIMIT: usize = 16384;
- pub const DEFAULT_FRAME_STACK_LIMIT: usize = 16384;
-/*
-	pub fn start_execution(&mut self, func: &FuncRef, args: &[RuntimeValue]) -> Result<Option<RuntimeValue>, Trap> {
-		let context = FunctionContext::new(
-			func.clone(),
-			DEFAULT_VALUE_STACK_LIMIT,
-			DEFAULT_FRAME_STACK_LIMIT,
-			func.signature(),
-			args.into_iter().cloned().collect(),
-		);
+pub const DEFAULT_FRAME_STACK_LIMIT: usize = 16384;
 
-		let mut function_stack = VecDeque::new();
-		function_stack.push_back(context);
+pub struct WasmInstance<'a, E: Externals + 'a> {
+  pub interpreter: Interpreter<'a, E>,
+  pub stack: VecDeque<FunctionContext>,
+}
 
-		self.run_interpreter_loop(&mut function_stack)
-	}
-*/
+impl<'a, E: Externals> WasmInstance<'a, E> {
+  pub fn new(env: &'a mut E, func_ref: &FuncRef, args: &[RuntimeValue]) -> WasmInstance<'a, E> {
+    let mut interpreter = Interpreter::new(env);
+    let mut stack = create_stack(&func_ref, &[]);
+
+    WasmInstance { interpreter, stack }
+  }
+
+  pub fn resume(&mut self) -> Result<Option<RuntimeValue>, Trap> {
+    my_run_interpreter_loop(&mut self.interpreter, &mut self.stack)
+  }
+}
+
   pub fn create_stack(func: &FuncRef, args: &[RuntimeValue]) -> VecDeque<FunctionContext> {
 		let context = FunctionContext::new(
 			func.clone(),

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use super::host;
 use config::Config;
-use interpreter::{create_stack, my_run_interpreter_loop};
+use interpreter::{create_stack, my_run_interpreter_loop, WasmInstance};
 
 pub struct ApplicationState {
   /// (method, url path) -> (function name, module path, env)
@@ -63,9 +63,8 @@ pub fn server(config: Config) {
             .assert_no_start();
 
           if let Some(ExternVal::Func(func_ref)) = main.export_by_name(func_name) {
-            let mut interpreter = Interpreter::new(&mut env);
-            let mut stack = create_stack(&func_ref, &[]);
-            let res = my_run_interpreter_loop(&mut interpreter, &mut stack).map_err(|t| Error::Trap(t));
+            let mut instance = WasmInstance::new(&mut env, &func_ref, &[]);
+            let res = instance.resume().map_err(|t| Error::Trap(t));
             println!(
                 "invocation result: {:?}",
                 res
