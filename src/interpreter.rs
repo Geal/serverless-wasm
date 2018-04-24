@@ -1,4 +1,4 @@
-use wasmi::{Externals, Error, Interpreter,FuncRef,FunctionContext,RuntimeValue,Trap,FuncInstance,RunResult,BlockFrameType};
+use wasmi::{Externals, Interpreter,FuncRef,FunctionContext,RuntimeValue,Trap,FuncInstance,RunResult,BlockFrameType};
 use std::collections::VecDeque;
 
 pub const DEFAULT_VALUE_STACK_LIMIT: usize = 16384;
@@ -11,8 +11,8 @@ pub struct WasmInstance<'a, E: Externals + 'a> {
 
 impl<'a, E: Externals> WasmInstance<'a, E> {
   pub fn new(env: &'a mut E, func_ref: &FuncRef, args: &[RuntimeValue]) -> WasmInstance<'a, E> {
-    let mut interpreter = Interpreter::new(env);
-    let mut stack = create_stack(&func_ref, &[]);
+    let interpreter = Interpreter::new(env);
+    let stack = create_stack(&func_ref, args);
 
     WasmInstance { interpreter, stack }
   }

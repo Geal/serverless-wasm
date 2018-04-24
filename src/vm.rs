@@ -1,9 +1,8 @@
 use parity_wasm;
 use parity_wasm::elements::{External, FunctionType, Internal, Type, ValueType};
-use wasmi::{self,ImportsBuilder, Module, ModuleInstance, NopExternals,
-  RuntimeValue, FuncInstance, Error, ExternVal, Interpreter};
+use wasmi::{self,ImportsBuilder, Module, ModuleInstance,
+  RuntimeValue, Error, ExternVal};
 use rouille;
-use std::collections::HashMap;
 
 use super::host;
 use config::{Config, ApplicationState};
@@ -34,7 +33,7 @@ pub fn server(config: Config) {
           };
 
           if let host::PreparedResponse {
-            status_code: Some(status), headers: headers, body: Some(body)
+            status_code: Some(status), headers, body: Some(body)
           } = env.prepared_response {
             rouille::Response {
               status_code: status,
@@ -51,6 +50,7 @@ pub fn server(config: Config) {
     });
 }
 
+/*
 pub fn start(file: &str) {
     let module = load_module(file, "handle");
     let mut env = host::TestHost::new();
@@ -63,12 +63,13 @@ pub fn start(file: &str) {
         main.invoke_export("handle", &[], &mut env)
     );
 }
+*/
 
 pub fn load_module(file:&str, func_name: &str) -> Module {
     let module = parity_wasm::deserialize_file(file).expect("File to be deserialized");
 
     // Extracts call arguments from command-line arguments
-    let args = {
+    let _args = {
         // Export section has an entry with a func_name with an index inside a module
         let export_section = module.export_section().expect("No export section found");
         // It's a section with function declarations (which are references to the type section entries)
@@ -126,7 +127,7 @@ pub fn load_module(file:&str, func_name: &str) -> Module {
             .params()
             .iter()
             .enumerate()
-            .map(|(i, value)| match value {
+            .map(|(_i, value)| match value {
                 &ValueType::I32 => RuntimeValue::I32(
                     0, /* program_args[i]
                         .parse::<i32>()

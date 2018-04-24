@@ -8,8 +8,6 @@ extern crate serde_derive;
 
 use std::env::args;
 
-use parity_wasm::elements::{External, FunctionType, Internal, Type, ValueType};
-use wasmi::{ImportsBuilder, ModuleInstance, NopExternals, RuntimeValue};
 
 mod host;
 mod vm;

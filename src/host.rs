@@ -1,12 +1,11 @@
 //! from https://github.com/paritytech/wasmi/blob/master/src/tests/host.rs
 
 use wasmi::*;
-use wasmi::memory_units::{Bytes, Pages};
+use wasmi::memory_units::Pages;
 use std::str;
 use std::collections::HashMap;
 use std::io::{Read,Write};
 use std::iter::repeat;
-use rouille::Response;
 use slab::Slab;
 use std::net::TcpStream;
 
@@ -84,7 +83,6 @@ impl Externals for TestHost {
               let ptr: u32 = args.nth(0);
               let sz:  u64 = args.nth(1);
 
-              let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
               let memory = self.memory
                 .as_ref()
                 .expect("Function 'inc_mem' expects attached memory");
@@ -98,11 +96,10 @@ impl Externals for TestHost {
               let ptr: u32 = args.nth(1);
               let sz:  u64 = args.nth(2);
 
-              let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
               let memory = self.memory
                 .as_ref()
                 .expect("Function 'inc_mem' expects attached memory");
-              let reason = memory.get(ptr, sz as usize).unwrap();
+              let _reason = memory.get(ptr, sz as usize).unwrap();
 
               self.prepared_response.status_code = Some(status as u16);
 
@@ -114,14 +111,12 @@ impl Externals for TestHost {
               let ptr2: u32 = args.nth(2);
               let sz2:  u64 = args.nth(3);
               let header_name = {
-                let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
                 let memory = self.memory
                   .as_ref()
                   .expect("Function 'inc_mem' expects attached memory");
                 memory.get(ptr1, sz1 as usize).unwrap()
               };
               let header_value = {
-                let byte_size: Bytes = self.memory.as_ref().map(|m| m.current_size().into()).unwrap();
                 let memory = self.memory
                   .as_ref()
                   .expect("Function 'inc_mem' expects attached memory");
@@ -271,18 +266,18 @@ impl ModuleImportResolver for TestHost {
 
     fn resolve_memory(
         &self,
-        field_name: &str,
+        _field_name: &str,
         _memory_type: &MemoryDescriptor,
     ) -> Result<MemoryRef, Error> {
       let Pages(initial1) = self.memory.as_ref().map(|m| m.initial()).unwrap();
       let initial2 = _memory_type.initial() as usize;
       //println!("requested {} pages", initial2);
       if initial2 > initial1 {
-        self.memory.as_ref().map(|m| {
+        self.memory.as_ref().map(|_m| {
           //println!("grow res: {:?}", m.grow(Pages(initial2 - initial1)).unwrap());
         });
       }
-      let Pages(initial) = self.memory.as_ref().map(|m| m.current_size()).unwrap();
+      let Pages(_initial) = self.memory.as_ref().map(|m| m.current_size()).unwrap();
       //println!("current number of pages: {}", initial);
       //println!("resolving memory at name: {}", field_name);
       let res = self.memory.as_ref().unwrap().clone();
