@@ -1,11 +1,11 @@
+use interpreter::load_module;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use std::collections::HashMap;
 use toml;
-use interpreter::load_module;
 use wasmi::Module;
 
-#[derive(Deserialize,Debug)]
+#[derive(Deserialize, Debug)]
 pub struct WasmApp {
   pub file_path: String,
   pub method: String,
@@ -14,7 +14,7 @@ pub struct WasmApp {
   pub env: Option<HashMap<String, String>>,
 }
 
-#[derive(Deserialize,Debug)]
+#[derive(Deserialize, Debug)]
 pub struct Config {
   pub listen_address: String,
   pub applications: Vec<WasmApp>,
@@ -24,10 +24,12 @@ pub fn load(file: &str) -> Option<Config> {
   if let Ok(mut file) = File::open(file) {
     let mut contents = String::new();
     if let Ok(_) = file.read_to_string(&mut contents) {
-      return toml::from_str(&contents).map_err(|e| {
-        println!("configuration deserialization error: {:?}", e);
-        e
-      }).ok()
+      return toml::from_str(&contents)
+        .map_err(|e| {
+          println!("configuration deserialization error: {:?}", e);
+          e
+        })
+        .ok();
     }
   }
   None
@@ -42,7 +44,7 @@ pub struct ApplicationState {
 
 impl ApplicationState {
   pub fn new(config: &Config) -> ApplicationState {
-    let mut routes  = HashMap::new();
+    let mut routes = HashMap::new();
     let mut modules = HashMap::new();
 
     for app in config.applications.iter() {
@@ -53,11 +55,14 @@ impl ApplicationState {
         modules.insert(app.file_path.clone(), module);
       }
 
-      routes.insert((app.method.clone(), app.url_path.clone()), (app.function.clone(), app.file_path.clone(), app.env.clone()));
+      routes.insert(
+        (app.method.clone(), app.url_path.clone()),
+        (app.function.clone(), app.file_path.clone(), app.env.clone()),
+      );
     }
 
     ApplicationState {
-      routes:  routes,
+      routes: routes,
       modules: modules,
     }
   }
@@ -72,4 +77,3 @@ impl ApplicationState {
     None
   }
 }
-
