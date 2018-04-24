@@ -8,11 +8,10 @@ extern crate serde_derive;
 
 use std::env::args;
 
-
-mod host;
-mod vm;
 mod config;
 mod interpreter;
+mod sync;
+mod async;
 
 fn main() {
     let args: Vec<_> = args().collect();
@@ -22,7 +21,7 @@ fn main() {
     }
 
     if let Some(config) = config::load(&args[1]) {
-      vm::server(config);
+      sync::server(config);
     } else {
       println!("invalid configuration");
     }

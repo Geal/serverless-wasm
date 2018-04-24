@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::Read;
 use std::collections::HashMap;
 use toml;
-use vm::load_module;
+use interpreter::load_module;
 use wasmi::Module;
 
 #[derive(Deserialize,Debug)]
