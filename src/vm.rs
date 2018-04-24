@@ -1,11 +1,13 @@
 use parity_wasm;
 use parity_wasm::elements::{External, FunctionType, Internal, Type, ValueType};
-use wasmi::{self,ImportsBuilder, Module, ModuleInstance, NopExternals, RuntimeValue};
+use wasmi::{self,ImportsBuilder, Module, ModuleInstance, NopExternals,
+  RuntimeValue, FuncInstance, Error, ExternVal, Interpreter};
 use rouille;
 use std::collections::HashMap;
 
 use super::host;
 use config::Config;
+use interpreter::{create_stack, my_run_interpreter_loop};
 
 pub struct ApplicationState {
   /// (method, url path) -> (function name, module path, env)
@@ -60,10 +62,17 @@ pub fn server(config: Config) {
             .expect("Failed to instantiate module")
             .assert_no_start();
 
-          println!(
-              "invocation result: {:?}",
-              main.invoke_export(func_name, &[], &mut env)
-          );
+          if let Some(ExternVal::Func(func_ref)) = main.export_by_name(func_name) {
+            let mut interpreter = Interpreter::new(&mut env);
+            let mut stack = create_stack(&func_ref, &[]);
+            let res = my_run_interpreter_loop(&mut interpreter, &mut stack).map_err(|t| Error::Trap(t));
+            println!(
+                "invocation result: {:?}",
+                res
+            );
+          } else {
+            panic!("handle error here");
+          };
 
           if let host::PreparedResponse {
             status_code: Some(status), headers: headers, body: Some(body)

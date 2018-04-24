@@ -14,6 +14,7 @@ use wasmi::{ImportsBuilder, ModuleInstance, NopExternals, RuntimeValue};
 mod host;
 mod vm;
 mod config;
+mod interpreter;
 
 fn main() {
     let args: Vec<_> = args().collect();
