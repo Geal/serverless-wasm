@@ -11,6 +11,7 @@ use interpreter::WasmInstance;
 use super::host;
 use config::ApplicationState;
 use httparse;
+use wasmi::{Error, ExternVal, ImportsBuilder, ModuleInstance};
 
 #[derive(Debug,Clone,PartialEq)]
 pub enum ExecutionResult {
@@ -38,6 +39,7 @@ pub struct Session<'a> {
   client: Stream,
   backends: HashMap<usize, Stream>,
   instance: Option<WasmInstance<'a, host::AsyncHost>>,
+  env: Option<host::AsyncHost>,
   config: Rc<RefCell<ApplicationState>>,
   buffer: Buf,
 }
@@ -65,13 +67,43 @@ impl<'a> Session<'a> {
       client,
       backends: HashMap::new(),
       instance: None,
+      env: None,
       config,
-      buffer
+      buffer,
     }
   }
 
   pub fn resume(&mut self) {
     self.instance.as_mut().map(|instance| instance.resume());
+  }
+
+  pub fn create_instance(&mut self, method: &str, path: &str) -> ExecutionResult {
+    if let Some((func_name, module, ref opt_env)) = self.config.borrow().route(method, path) {
+      let mut env = host::AsyncHost::new();
+      if let Some(h) = opt_env {
+        env.db.extend(
+          h.iter().map(|(ref k, ref v)| (k.to_string(), v.to_string()))
+        );
+      }
+
+      let main = ModuleInstance::new(&module, &ImportsBuilder::new().with_resolver("env", &env))
+        .expect("Failed to instantiate module")
+        .assert_no_start();
+
+      self.env = Some(env);
+
+      if let Some(ExternVal::Func(func_ref)) = main.export_by_name(func_name) {
+        let instance = WasmInstance::new(self.env.as_mut().unwrap(), &func_ref, &[]);
+        self.instance = Some(instance);
+        ExecutionResult::Continue
+      } else {
+        println!("function not found");
+        ExecutionResult::Close(vec![self.client.index])
+      }
+    } else {
+      println!("route not found");
+      ExecutionResult::Close(vec![self.client.index])
+    }
   }
 
   pub fn process_events(&mut self, token: usize, events: Ready) -> bool {
@@ -134,21 +166,27 @@ impl<'a> Session<'a> {
       }
     }
 
-    let mut headers = [httparse::Header{ name: "", value: &[] }; 16];
-    let mut req = httparse::Request::new(&mut headers);
-    match req.parse(&self.buffer.buf[self.buffer.offset..self.buffer.len]) {
-      Err(e) => {
-        println!("http parsing error: {:?}", e);
-        return ExecutionResult::Close(vec![self.client.index]);
-      },
-      Ok(httparse::Status::Partial) => {
-        return ExecutionResult::Continue;
-      },
-      Ok(httparse::Status::Complete(sz)) => {
-        self.buffer.offset += sz;
-
-        println!("got request: {:#?}", req);
+    let (method, path) = {
+      let mut headers = [httparse::Header{ name: "", value: &[] }; 16];
+      let mut req = httparse::Request::new(&mut headers);
+      match req.parse(&self.buffer.buf[self.buffer.offset..self.buffer.len]) {
+        Err(e) => {
+          println!("http parsing error: {:?}", e);
+          return ExecutionResult::Close(vec![self.client.index]);
+        },
+        Ok(httparse::Status::Partial) => {
+          return ExecutionResult::Continue;
+        },
+        Ok(httparse::Status::Complete(sz)) => {
+          self.buffer.offset += sz;
+          println!("got request: {:#?}", req);
+          (req.method.unwrap().to_string(), req.path.unwrap().to_string())
+        }
       }
+    };
+
+    if self.create_instance(&method, &path) == ExecutionResult::Continue {
+      self.resume();
     }
 
     ExecutionResult::Continue
