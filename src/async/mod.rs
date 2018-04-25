@@ -2,6 +2,7 @@ use config::{ApplicationState, Config};
 
 use mio::*;
 use mio::net::TcpListener;
+use mio::unix::UnixReady;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -43,7 +44,14 @@ pub fn server(config: Config) {
               },
               Some(entry) => {
                 let index = entry.index();
-                let client = Rc::new(RefCell::new(session::Session::new(state.clone(), sock, index, &mut poll)));
+                poll.register(
+                  &sock,
+                  Token(index + 1),
+                  Ready::readable() | Ready::writable() | Ready::from(UnixReady::hup() | UnixReady::error()),
+                  PollOpt::edge()
+                );
+
+                let client = Rc::new(RefCell::new(session::Session::new(state.clone(), sock, index)));
                 entry.insert(client);
               }
             }
@@ -65,15 +73,17 @@ pub fn server(config: Config) {
     }
 
     for client_token in ready.drain(..) {
-      let mut cont = true;
+      let mut cont = session::ExecutionResult::Continue;
       if let Some(ref mut client) = connections.get_mut(client_token) {
         cont = client.borrow_mut().execute(&mut poll);
       } else {
         println!("non existing token {:?} was marked as ready", client_token);
       }
 
-      if !cont {
-        connections.remove(client_token);
+      if let session::ExecutionResult::Close(tokens) = cont {
+        for t in tokens.iter() {
+          connections.remove(client_token);
+        }
       }
     }
   }
