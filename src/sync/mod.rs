@@ -22,10 +22,12 @@ pub fn server(config: Config) {
         .expect("Failed to instantiate module")
         .assert_no_start();
 
+      let mut response = env.prepared_response.clone();
       if let Some(ExternVal::Func(func_ref)) = main.export_by_name(func_name) {
-        let mut instance = WasmInstance::new(&mut env, &func_ref, &[]);
+        let mut instance = WasmInstance::new(env, &func_ref, &[]);
         let res = instance.resume().map_err(|t| Error::Trap(t));
         println!("invocation result: {:?}", res);
+        response = instance.mut_externals().prepared_response.clone();
       } else {
         panic!("handle error here");
       };
@@ -34,7 +36,7 @@ pub fn server(config: Config) {
         status_code: Some(status),
         headers,
         body: Some(body),
-      } = env.prepared_response
+      } = response
       {
         rouille::Response {
           status_code: status,

@@ -7,13 +7,13 @@ use wasmi::{BlockFrameType, Externals, FuncInstance, FuncRef, FunctionContext, I
 pub const DEFAULT_VALUE_STACK_LIMIT: usize = 16384;
 pub const DEFAULT_FRAME_STACK_LIMIT: usize = 16384;
 
-pub struct WasmInstance<'a, E: Externals + 'a> {
-  pub interpreter: Interpreter<'a, E>,
+pub struct WasmInstance<E: Externals> {
+  pub interpreter: Interpreter<E>,
   pub stack: VecDeque<FunctionContext>,
 }
 
-impl<'a, E: Externals> WasmInstance<'a, E> {
-  pub fn new(env: &'a mut E, func_ref: &FuncRef, args: &[RuntimeValue]) -> WasmInstance<'a, E> {
+impl<E: Externals> WasmInstance<E> {
+  pub fn new(env: E, func_ref: &FuncRef, args: &[RuntimeValue]) -> WasmInstance<E> {
     let interpreter = Interpreter::new(env);
     let stack = create_stack(&func_ref, args);
 
@@ -22,6 +22,10 @@ impl<'a, E: Externals> WasmInstance<'a, E> {
 
   pub fn resume(&mut self) -> Result<Option<RuntimeValue>, Trap> {
     my_run_interpreter_loop(&mut self.interpreter, &mut self.stack)
+  }
+
+  pub fn mut_externals(&mut self) -> &mut E {
+    self.interpreter.mut_externals()
   }
 }
 
@@ -40,8 +44,8 @@ pub fn create_stack(func: &FuncRef, args: &[RuntimeValue]) -> VecDeque<FunctionC
   function_stack
 }
 
-pub fn my_run_interpreter_loop<'a, E>(
-  interpreter: &mut Interpreter<'a, E>,
+pub fn my_run_interpreter_loop<E>(
+  interpreter: &mut Interpreter<E>,
   function_stack: &mut VecDeque<FunctionContext>,
 ) -> Result<Option<RuntimeValue>, Trap>
 where
@@ -82,8 +86,8 @@ where
         None => return Ok(return_value),
       },
       RunResult::NestedCall(nested_func) => {
-        println!("calling nested func");
-        match FuncInstance::invoke_context(&nested_func, &mut function_context, interpreter.externals)? {
+        //println!("calling nested func");
+        match FuncInstance::invoke_context(&nested_func, &mut function_context, interpreter.mut_externals())? {
           None => {
             function_stack.push_back(function_context);
           }

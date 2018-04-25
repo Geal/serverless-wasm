@@ -22,6 +22,7 @@ impl ::std::fmt::Display for HostErrorWithCode {
 
 impl HostError for HostErrorWithCode {}
 
+#[derive(Clone)]
 pub struct PreparedResponse {
   pub status_code: Option<u16>,
   pub headers: Vec<(String, String)>,

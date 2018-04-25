@@ -4,14 +4,14 @@ use mio::{Poll, Ready};
 use std::collections::HashMap;
 use std::iter::repeat;
 use std::rc::Rc;
-use std::io::{ErrorKind, Read};
+use std::io::{ErrorKind, Read, Write};
 use std::cell::RefCell;
 
 use interpreter::WasmInstance;
 use super::host;
 use config::ApplicationState;
 use httparse;
-use wasmi::{Error, ExternVal, ImportsBuilder, ModuleInstance};
+use wasmi::{ExternVal, ImportsBuilder, ModuleInstance};
 
 #[derive(Debug,Clone,PartialEq)]
 pub enum ExecutionResult {
@@ -35,17 +35,16 @@ pub struct Buf {
   len:    usize,
 }
 
-pub struct Session<'a> {
+pub struct Session {
   client: Stream,
   backends: HashMap<usize, Stream>,
-  instance: Option<WasmInstance<'a, host::AsyncHost>>,
-  env: Option<host::AsyncHost>,
+  instance: Option<WasmInstance<host::AsyncHost>>,
   config: Rc<RefCell<ApplicationState>>,
   buffer: Buf,
 }
 
-impl<'a> Session<'a> {
-  pub fn new(config: Rc<RefCell<ApplicationState>>, stream: TcpStream, index: usize) -> Session<'a> {
+impl Session {
+  pub fn new(config: Rc<RefCell<ApplicationState>>, stream: TcpStream, index: usize) -> Session {
     let client = Stream {
       readiness: UnixReady::from(Ready::empty()),
       interest: UnixReady::from(Ready::readable()) | UnixReady::hup() | UnixReady::error(),
@@ -67,7 +66,6 @@ impl<'a> Session<'a> {
       client,
       backends: HashMap::new(),
       instance: None,
-      env: None,
       config,
       buffer,
     }
@@ -75,6 +73,12 @@ impl<'a> Session<'a> {
 
   pub fn resume(&mut self) {
     self.instance.as_mut().map(|instance| instance.resume());
+    if self.instance.as_mut().map(|instance| {
+      println!("set up response: {:?}", instance.mut_externals().prepared_response);
+      instance.mut_externals().prepared_response.status_code.is_some() && instance.mut_externals().prepared_response.body.is_some()
+    }).unwrap_or(false) {
+      self.client.interest.insert(Ready::writable());
+    }
   }
 
   pub fn create_instance(&mut self, method: &str, path: &str) -> ExecutionResult {
@@ -90,10 +94,8 @@ impl<'a> Session<'a> {
         .expect("Failed to instantiate module")
         .assert_no_start();
 
-      self.env = Some(env);
-
       if let Some(ExternVal::Func(func_ref)) = main.export_by_name(func_name) {
-        let instance = WasmInstance::new(self.env.as_mut().unwrap(), &func_ref, &[]);
+        let instance = WasmInstance::new(env, &func_ref, &[]);
         self.instance = Some(instance);
         ExecutionResult::Continue
       } else {
@@ -107,6 +109,7 @@ impl<'a> Session<'a> {
   }
 
   pub fn process_events(&mut self, token: usize, events: Ready) -> bool {
+    println!("token {} got events {:?}", token, events);
     if token == self.client.index {
       self.client.readiness = self.client.readiness | UnixReady::from(events);
 
@@ -179,13 +182,16 @@ impl<'a> Session<'a> {
         },
         Ok(httparse::Status::Complete(sz)) => {
           self.buffer.offset += sz;
-          println!("got request: {:#?}", req);
+          println!("got request: {:?}", req);
           (req.method.unwrap().to_string(), req.path.unwrap().to_string())
         }
       }
     };
 
+    self.client.interest.remove(Ready::readable());
+
     if self.create_instance(&method, &path) == ExecutionResult::Continue {
+      println!("resuming");
       self.resume();
     }
 
@@ -194,6 +200,17 @@ impl<'a> Session<'a> {
 
   fn front_writable(&mut self) -> ExecutionResult {
     println!("[{}] front writable", self.client.index);
-    ExecutionResult::Continue
+    let response = self.instance.as_mut().map(|instance| {
+      instance.mut_externals().prepared_response.clone()
+    }).unwrap();
+
+    self.client.stream.write_fmt(format_args!("{} Reason\r\n", response.status_code.unwrap()));
+    for header in response.headers.iter() {
+      self.client.stream.write_fmt(format_args!("{}: {}\r\n", header.0, header.1));
+    }
+    self.client.stream.write(b"\r\n");
+    self.client.stream.write(&response.body.unwrap()[..]);
+
+    ExecutionResult::Close(vec![self.client.index])
   }
 }
