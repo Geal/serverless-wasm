@@ -24,7 +24,7 @@ fn main() {
   }
 
   if let Some(config) = config::load(&args[1]) {
-    sync::server(config);
+    async::server(config);
   } else {
     println!("invalid configuration");
   }

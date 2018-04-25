@@ -9,9 +9,11 @@ authors = ["Geoffroy Couprie <geo.couprie@gmail.com>"]
 [dependencies]
 parity-wasm = "^0.27"
 rouille = "^2.1"
-slab = "^0.4"
+slab = "^0.3"
 toml = "^0.4"
 serde = "^1.0"
 serde_derive = "^1.0"
+mio = "^0.6"
+httparse = "^1.2"
 #wasmi = "^0.1"
 wasmi = { git = "https://github.com/geal/wasmi" }
