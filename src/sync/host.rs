@@ -39,7 +39,7 @@ impl PreparedResponse {
   }
 }
 
-pub struct TestHost {
+pub struct SyncHost {
   memory: Option<MemoryRef>,
   instance: Option<ModuleRef>,
   pub prepared_response: PreparedResponse,
@@ -47,9 +47,9 @@ pub struct TestHost {
   pub db: HashMap<String, String>,
 }
 
-impl TestHost {
-  pub fn new() -> TestHost {
-    TestHost {
+impl SyncHost {
+  pub fn new() -> SyncHost {
+    SyncHost {
       memory: Some(MemoryInstance::alloc(Pages(3), Some(Pages(10))).unwrap()),
       instance: None,
       prepared_response: PreparedResponse::new(),
@@ -73,7 +73,7 @@ const TCP_READ: usize = 5;
 const TCP_WRITE: usize = 6;
 const DB_GET: usize = 7;
 
-impl Externals for TestHost {
+impl Externals for SyncHost {
   fn invoke_index(&mut self, index: usize, args: RuntimeArgs) -> Result<Option<RuntimeValue>, Trap> {
     match index {
       LOG_INDEX => {
@@ -227,7 +227,7 @@ impl Externals for TestHost {
   }
 }
 
-impl TestHost {
+impl SyncHost {
   fn check_signature(&self, index: usize, signature: &Signature) -> bool {
     let (params, ret_ty): (&[ValueType], Option<ValueType>) = match index {
       LOG_INDEX => (&[ValueType::I32, ValueType::I64], None),
@@ -267,7 +267,7 @@ impl TestHost {
   }
 }
 
-impl ModuleImportResolver for TestHost {
+impl ModuleImportResolver for SyncHost {
   fn resolve_func(&self, field_name: &str, signature: &Signature) -> Result<FuncRef, Error> {
     let index = match field_name {
       "log" => LOG_INDEX,

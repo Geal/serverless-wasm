@@ -11,7 +11,7 @@ pub fn server(config: Config) {
 
   rouille::start_server(&config.listen_address, move |request| {
     if let Some((func_name, module, ref opt_env)) = state.route(request.method(), &request.url()) {
-      let mut env = host::TestHost::new();
+      let mut env = host::SyncHost::new();
       if let Some(h) = opt_env {
         env.db.extend(
           h.iter()
@@ -56,7 +56,7 @@ pub fn server(config: Config) {
 /*
 pub fn start(file: &str) {
     let module = load_module(file, "handle");
-    let mut env = host::TestHost::new();
+    let mut env = host::SyncHost::new();
     let main = ModuleInstance::new(&module, &ImportsBuilder::new().with_resolver("env", &env))
       .expect("Failed to instantiate module")
       .assert_no_start();
