@@ -11,7 +11,7 @@ pub fn server(config: Config) {
 
   rouille::start_server(&config.listen_address, move |request| {
     if let Some((func_name, module, ref opt_env)) = state.route(request.method(), &request.url()) {
-      let mut env = host::SyncHost::new();
+      let mut env = host::State::new();
       if let Some(h) = opt_env {
         env.db.extend(
           h.iter()
@@ -24,10 +24,10 @@ pub fn server(config: Config) {
 
       let mut response = env.prepared_response.clone();
       if let Some(ExternVal::Func(func_ref)) = main.export_by_name(func_name) {
-        let mut instance = WasmInstance::new(env, &func_ref, &[]);
+        let mut instance: WasmInstance<host::State, host::SyncHost> = WasmInstance::new(env, &func_ref, &[]);
         let res = instance.resume().map_err(|t| Error::Trap(t));
         println!("invocation result: {:?}", res);
-        response = instance.mut_externals().prepared_response.clone();
+        response = instance.state.borrow().prepared_response.clone();
       } else {
         panic!("handle error here");
       };

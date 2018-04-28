@@ -41,17 +41,21 @@ pub fn server(config: Config) {
             match connections.vacant_entry() {
               None => {
                 println!("error: no more room for new connections");
-              },
+              }
               Some(entry) => {
                 let index = entry.index();
                 poll.register(
                   &sock,
                   Token(index + 1),
                   Ready::readable() | Ready::writable() | Ready::from(UnixReady::hup() | UnixReady::error()),
-                  PollOpt::edge()
+                  PollOpt::edge(),
                 );
 
-                let client = Rc::new(RefCell::new(session::Session::new(state.clone(), sock, index)));
+                let client = Rc::new(RefCell::new(session::Session::new(
+                  state.clone(),
+                  sock,
+                  index,
+                )));
                 entry.insert(client);
               }
             }
@@ -61,11 +65,18 @@ pub fn server(config: Config) {
           let client_token = i - 1;
 
           if let Some(ref mut client) = connections.get_mut(client_token) {
-            if client.borrow_mut().process_events(client_token, event.readiness()) {
+            if client
+              .borrow_mut()
+              .process_events(client_token, event.readiness())
+            {
               ready.push_back(client_token);
             }
           } else {
-            println!("non existing token {:?} got events {:?}", client_token, event.readiness());
+            println!(
+              "non existing token {:?} got events {:?}",
+              client_token,
+              event.readiness()
+            );
           }
         }
         _ => unreachable!(),

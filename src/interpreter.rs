@@ -3,29 +3,45 @@ use parity_wasm::elements::{External, FunctionType, Internal, Type, ValueType};
 use std::collections::VecDeque;
 use wasmi::{self, Module};
 use wasmi::{BlockFrameType, Externals, FuncInstance, FuncRef, FunctionContext, Interpreter, RunResult, RuntimeValue, Trap};
+use std::marker;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 pub const DEFAULT_VALUE_STACK_LIMIT: usize = 16384;
 pub const DEFAULT_FRAME_STACK_LIMIT: usize = 16384;
 
-pub struct WasmInstance<E: Externals> {
-  pub interpreter: Interpreter<E>,
-  pub stack: VecDeque<FunctionContext>,
+pub trait HostBuilder<'a, S> {
+  fn build(s: &'a mut S) -> Self;
 }
 
-impl<E: Externals> WasmInstance<E> {
-  pub fn new(env: E, func_ref: &FuncRef, args: &[RuntimeValue]) -> WasmInstance<E> {
-    let interpreter = Interpreter::new(env);
+pub trait Host {
+  type State;
+
+  fn build(s: Rc<RefCell<Self::State>>) -> Self;
+}
+
+pub struct WasmInstance<S, E: Externals + Host<State = S>> {
+  pub state: Rc<RefCell<S>>,
+  pub stack: VecDeque<FunctionContext>,
+  _marker: marker::PhantomData<E>,
+}
+
+impl<S, E: Externals + Host<State = S>> WasmInstance<S, E> {
+  pub fn new(state: S, func_ref: &FuncRef, args: &[RuntimeValue]) -> WasmInstance<S, E> {
     let stack = create_stack(&func_ref, args);
 
-    WasmInstance { interpreter, stack }
+    WasmInstance {
+      state: Rc::new(RefCell::new(state)),
+      stack,
+      _marker: marker::PhantomData,
+    }
   }
 
   pub fn resume(&mut self) -> Result<Option<RuntimeValue>, Trap> {
-    my_run_interpreter_loop(&mut self.interpreter, &mut self.stack)
-  }
+    let mut host = E::build(self.state.clone());
+    let mut interpreter = Interpreter::new(&mut host);
 
-  pub fn mut_externals(&mut self) -> &mut E {
-    self.interpreter.mut_externals()
+    my_run_interpreter_loop(&mut interpreter, &mut self.stack)
   }
 }
 
@@ -87,7 +103,7 @@ where
       },
       RunResult::NestedCall(nested_func) => {
         //println!("calling nested func");
-        match FuncInstance::invoke_context(&nested_func, &mut function_context, interpreter.mut_externals())? {
+        match FuncInstance::invoke_context(&nested_func, &mut function_context, interpreter.externals)? {
           None => {
             function_stack.push_back(function_context);
           }

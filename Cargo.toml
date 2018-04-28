@@ -16,5 +16,5 @@ serde_derive = "^1.0"
 mio = "^0.6"
 httparse = "^1.2"
 #wasmi = "^0.1"
-#wasmi = { git = "https://github.com/geal/wasmi" }
-wasmi = { path = "../wasmi" }
+wasmi = { git = "https://github.com/geal/wasmi" }
+#wasmi = { path = "../wasmi" }

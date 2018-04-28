@@ -6,8 +6,11 @@ use std::io::{Read, Write};
 use std::iter::repeat;
 use std::net::TcpStream;
 use std::str;
+use std::rc::Rc;
+use std::cell::RefCell;
 use wasmi::memory_units::Pages;
 use wasmi::*;
+use interpreter::Host;
 
 #[derive(Debug, Clone, PartialEq)]
 struct HostErrorWithCode {
@@ -39,23 +42,35 @@ impl PreparedResponse {
   }
 }
 
-pub struct AsyncHost {
-  memory: Option<MemoryRef>,
-  instance: Option<ModuleRef>,
+pub struct State {
+  pub memory: Option<MemoryRef>,
+  pub instance: Option<ModuleRef>,
   pub prepared_response: PreparedResponse,
-  connections: Slab<TcpStream>,
+  pub connections: Slab<TcpStream>,
   pub db: HashMap<String, String>,
 }
 
-impl AsyncHost {
-  pub fn new() -> AsyncHost {
-    AsyncHost {
+impl State {
+  pub fn new() -> State {
+    State {
       memory: Some(MemoryInstance::alloc(Pages(3), Some(Pages(10))).unwrap()),
       instance: None,
       prepared_response: PreparedResponse::new(),
       connections: Slab::with_capacity(100),
       db: HashMap::new(),
     }
+  }
+}
+
+pub struct AsyncHost {
+  pub inner: Rc<RefCell<State>>,
+}
+
+impl Host for AsyncHost {
+  type State = State;
+
+  fn build(s: Rc<RefCell<Self::State>>) -> Self {
+    AsyncHost { inner: s }
   }
 }
 
@@ -80,11 +95,14 @@ impl Externals for AsyncHost {
         let ptr: u32 = args.nth(0);
         let sz: u64 = args.nth(1);
 
-        let memory = self
+        let v = self
+          .inner
+          .borrow()
           .memory
           .as_ref()
-          .expect("Function 'inc_mem' expects attached memory");
-        let v = memory.get(ptr, sz as usize).unwrap();
+          .expect("Function 'inc_mem' expects attached memory")
+          .get(ptr, sz as usize)
+          .unwrap();
 
         println!("log({} bytes): {}", v.len(), str::from_utf8(&v).unwrap());
         Ok(None)
@@ -94,13 +112,16 @@ impl Externals for AsyncHost {
         let ptr: u32 = args.nth(1);
         let sz: u64 = args.nth(2);
 
-        let memory = self
+        let _reason = self
+          .inner
+          .borrow()
           .memory
           .as_ref()
-          .expect("Function 'inc_mem' expects attached memory");
-        let _reason = memory.get(ptr, sz as usize).unwrap();
+          .expect("Function 'inc_mem' expects attached memory")
+          .get(ptr, sz as usize)
+          .unwrap();
 
-        self.prepared_response.status_code = Some(status as u16);
+        self.inner.borrow_mut().prepared_response.status_code = Some(status as u16);
 
         Ok(None)
       }
@@ -110,21 +131,27 @@ impl Externals for AsyncHost {
         let ptr2: u32 = args.nth(2);
         let sz2: u64 = args.nth(3);
         let header_name = {
-          let memory = self
+          self
+            .inner
+            .borrow()
             .memory
             .as_ref()
-            .expect("Function 'inc_mem' expects attached memory");
-          memory.get(ptr1, sz1 as usize).unwrap()
+            .expect("Function 'inc_mem' expects attached memory")
+            .get(ptr1, sz1 as usize)
+            .unwrap()
         };
         let header_value = {
-          let memory = self
+          self
+            .inner
+            .borrow()
             .memory
             .as_ref()
-            .expect("Function 'inc_mem' expects attached memory");
-          memory.get(ptr2, sz2 as usize).unwrap()
+            .expect("Function 'inc_mem' expects attached memory")
+            .get(ptr2, sz2 as usize)
+            .unwrap()
         };
 
-        self.prepared_response.headers.push((
+        self.inner.borrow_mut().prepared_response.headers.push((
           String::from_utf8(header_name).unwrap(),
           String::from_utf8(header_value).unwrap(),
         ));
@@ -134,26 +161,32 @@ impl Externals for AsyncHost {
         let ptr: u32 = args.nth(0);
         let sz: u64 = args.nth(1);
 
-        let memory = self
+        let body = self
+          .inner
+          .borrow()
           .memory
           .as_ref()
-          .expect("Function 'inc_mem' expects attached memory");
-        let body = memory.get(ptr, sz as usize).unwrap();
-        self.prepared_response.body = Some(body);
+          .expect("Function 'inc_mem' expects attached memory")
+          .get(ptr, sz as usize)
+          .unwrap();
+        self.inner.borrow_mut().prepared_response.body = Some(body);
         Ok(None)
       }
       TCP_CONNECT => {
         let ptr: u32 = args.nth(0);
         let sz: u64 = args.nth(1);
 
-        let memory = self
+        let v = self
+          .inner
+          .borrow()
           .memory
           .as_ref()
-          .expect("Function 'inc_mem' expects attached memory");
-        let v = memory.get(ptr, sz as usize).unwrap();
+          .expect("Function 'inc_mem' expects attached memory")
+          .get(ptr, sz as usize)
+          .unwrap();
         let address = String::from_utf8(v).unwrap();
         if let Ok(socket) = TcpStream::connect(&address) {
-          if let Ok(fd) = self.connections.insert(socket) {
+          if let Ok(fd) = self.inner.borrow_mut().connections.insert(socket) {
             Ok(Some(RuntimeValue::I32(fd as i32)))
           } else {
             Ok(Some(RuntimeValue::I32(-2)))
@@ -168,8 +201,10 @@ impl Externals for AsyncHost {
         let sz: u64 = args.nth(2);
         let mut v = Vec::with_capacity(sz as usize);
         v.extend(repeat(0).take(sz as usize));
-        if let Ok(sz) = self.connections[fd as usize].read(&mut v) {
-          self.memory.as_ref().map(|m| m.set(ptr, &v[..sz]));
+
+        let mut state = self.inner.borrow_mut();
+        if let Ok(sz) = state.connections[fd as usize].read(&mut v) {
+          state.memory.as_ref().map(|m| m.set(ptr, &v[..sz]));
 
           Ok(Some(RuntimeValue::I64(sz as i64)))
         } else {
@@ -181,13 +216,16 @@ impl Externals for AsyncHost {
         let ptr: u32 = args.nth(1);
         let sz: u64 = args.nth(2);
 
-        let memory = self
+        let buf = self
+          .inner
+          .borrow()
           .memory
           .as_ref()
-          .expect("Function 'inc_mem' expects attached memory");
-        let buf = memory.get(ptr, sz as usize).unwrap();
+          .expect("Function 'inc_mem' expects attached memory")
+          .get(ptr, sz as usize)
+          .unwrap();
 
-        if let Ok(sz) = self.connections[fd as usize].write(&buf) {
+        if let Ok(sz) = self.inner.borrow_mut().connections[fd as usize].write(&buf) {
           Ok(Some(RuntimeValue::I64(sz as i64)))
         } else {
           Ok(Some(RuntimeValue::I64(-1)))
@@ -199,21 +237,26 @@ impl Externals for AsyncHost {
         let value_ptr: u32 = args.nth(2);
         let value_sz: u64 = args.nth(3);
 
-        let memory = self
+        let v = self
+          .inner
+          .borrow()
           .memory
           .as_ref()
-          .expect("Function 'inc_mem' expects attached memory");
-        let v = memory.get(key_ptr, key_sz as usize).unwrap();
+          .expect("Function 'inc_mem' expects attached memory")
+          .get(key_ptr, key_sz as usize)
+          .unwrap();
         let key = String::from_utf8(v).unwrap();
         println!("requested value for key {}", key);
 
-        match self.db.get(&key) {
+        match self.inner.borrow().db.get(&key) {
           None => Ok(Some(RuntimeValue::I64(-1))),
           Some(value) => {
             if value.len() > value_sz as usize {
               Ok(Some(RuntimeValue::I64(-2)))
             } else {
               self
+                .inner
+                .borrow()
                 .memory
                 .as_ref()
                 .map(|m| m.set(value_ptr, value.as_bytes()));
@@ -227,7 +270,7 @@ impl Externals for AsyncHost {
   }
 }
 
-impl AsyncHost {
+impl State {
   fn check_signature(&self, index: usize, signature: &Signature) -> bool {
     let (params, ret_ty): (&[ValueType], Option<ValueType>) = match index {
       LOG_INDEX => (&[ValueType::I32, ValueType::I64], None),
@@ -267,7 +310,7 @@ impl AsyncHost {
   }
 }
 
-impl ModuleImportResolver for AsyncHost {
+impl ModuleImportResolver for State {
   fn resolve_func(&self, field_name: &str, signature: &Signature) -> Result<FuncRef, Error> {
     let index = match field_name {
       "log" => LOG_INDEX,

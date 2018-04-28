@@ -13,7 +13,7 @@ use config::ApplicationState;
 use httparse;
 use wasmi::{ExternVal, ImportsBuilder, ModuleInstance};
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExecutionResult {
   WouldBlock,
   Close(Vec<usize>),
@@ -30,15 +30,15 @@ pub struct Stream {
 }
 
 pub struct Buf {
-  buf:    Vec<u8>,
+  buf: Vec<u8>,
   offset: usize,
-  len:    usize,
+  len: usize,
 }
 
 pub struct Session {
   client: Stream,
   backends: HashMap<usize, Stream>,
-  instance: Option<WasmInstance<host::AsyncHost>>,
+  instance: Option<WasmInstance<host::State, host::AsyncHost>>,
   config: Rc<RefCell<ApplicationState>>,
   buffer: Buf,
 }
@@ -52,14 +52,13 @@ impl Session {
       index,
     };
 
-
     let capacity = 8192;
     let mut v = Vec::with_capacity(capacity);
     v.extend(repeat(0).take(capacity));
     let buffer = Buf {
-      buf:    v,
+      buf: v,
       offset: 0,
-      len:    0,
+      len: 0,
     };
 
     Session {
@@ -73,20 +72,34 @@ impl Session {
 
   pub fn resume(&mut self) {
     self.instance.as_mut().map(|instance| instance.resume());
-    if self.instance.as_mut().map(|instance| {
-      println!("set up response: {:?}", instance.mut_externals().prepared_response);
-      instance.mut_externals().prepared_response.status_code.is_some() && instance.mut_externals().prepared_response.body.is_some()
-    }).unwrap_or(false) {
+    if self
+      .instance
+      .as_mut()
+      .map(|instance| {
+        println!(
+          "set up response: {:?}",
+          instance.state.borrow().prepared_response
+        );
+        instance
+          .state
+          .borrow()
+          .prepared_response
+          .status_code
+          .is_some() && instance.state.borrow().prepared_response.body.is_some()
+      })
+      .unwrap_or(false)
+    {
       self.client.interest.insert(Ready::writable());
     }
   }
 
   pub fn create_instance(&mut self, method: &str, path: &str) -> ExecutionResult {
     if let Some((func_name, module, ref opt_env)) = self.config.borrow().route(method, path) {
-      let mut env = host::AsyncHost::new();
+      let mut env = host::State::new();
       if let Some(h) = opt_env {
         env.db.extend(
-          h.iter().map(|(ref k, ref v)| (k.to_string(), v.to_string()))
+          h.iter()
+            .map(|(ref k, ref v)| (k.to_string(), v.to_string())),
         );
       }
 
@@ -153,13 +166,17 @@ impl Session {
         break;
       }
 
-      match self.client.stream.read(&mut self.buffer.buf[self.buffer.offset + self.buffer.len..]) {
+      match self
+        .client
+        .stream
+        .read(&mut self.buffer.buf[self.buffer.offset + self.buffer.len..])
+      {
         Ok(0) => {
           return ExecutionResult::Close(vec![self.client.index]);
-        },
+        }
         Ok(sz) => {
           self.buffer.len += sz;
-        },
+        }
         Err(e) => {
           if e.kind() == ErrorKind::WouldBlock {
             self.client.readiness.remove(Ready::readable());
@@ -170,20 +187,26 @@ impl Session {
     }
 
     let (method, path) = {
-      let mut headers = [httparse::Header{ name: "", value: &[] }; 16];
+      let mut headers = [httparse::Header {
+        name: "",
+        value: &[],
+      }; 16];
       let mut req = httparse::Request::new(&mut headers);
       match req.parse(&self.buffer.buf[self.buffer.offset..self.buffer.len]) {
         Err(e) => {
           println!("http parsing error: {:?}", e);
           return ExecutionResult::Close(vec![self.client.index]);
-        },
+        }
         Ok(httparse::Status::Partial) => {
           return ExecutionResult::Continue;
-        },
+        }
         Ok(httparse::Status::Complete(sz)) => {
           self.buffer.offset += sz;
           println!("got request: {:?}", req);
-          (req.method.unwrap().to_string(), req.path.unwrap().to_string())
+          (
+            req.method.unwrap().to_string(),
+            req.path.unwrap().to_string(),
+          )
         }
       }
     };
@@ -200,13 +223,21 @@ impl Session {
 
   fn front_writable(&mut self) -> ExecutionResult {
     println!("[{}] front writable", self.client.index);
-    let response = self.instance.as_mut().map(|instance| {
-      instance.mut_externals().prepared_response.clone()
-    }).unwrap();
+    let response = self
+      .instance
+      .as_mut()
+      .map(|instance| instance.state.borrow().prepared_response.clone())
+      .unwrap();
 
-    self.client.stream.write_fmt(format_args!("{} Reason\r\n", response.status_code.unwrap()));
+    self
+      .client
+      .stream
+      .write_fmt(format_args!("{} Reason\r\n", response.status_code.unwrap()));
     for header in response.headers.iter() {
-      self.client.stream.write_fmt(format_args!("{}: {}\r\n", header.0, header.1));
+      self
+        .client
+        .stream
+        .write_fmt(format_args!("{}: {}\r\n", header.0, header.1));
     }
     self.client.stream.write(b"\r\n");
     self.client.stream.write(&response.body.unwrap()[..]);
