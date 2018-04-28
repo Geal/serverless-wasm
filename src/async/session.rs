@@ -6,6 +6,7 @@ use std::iter::repeat;
 use std::rc::Rc;
 use std::io::{ErrorKind, Read, Write};
 use std::cell::RefCell;
+use std::net::Shutdown;
 
 use interpreter::WasmInstance;
 use super::host;
@@ -113,10 +114,22 @@ impl Session {
         ExecutionResult::Continue
       } else {
         println!("function not found");
+        self
+          .client
+          .stream
+          .write(b"404 Not Found\r\nContent-length: 19\r\n\r\nFunction not found\n");
+        self.client.stream.shutdown(Shutdown::Both);
+        self.client.interest = UnixReady::from(Ready::empty());
         ExecutionResult::Close(vec![self.client.index])
       }
     } else {
       println!("route not found");
+      self
+        .client
+        .stream
+        .write(b"404 Not Found\r\nContent-length: 16\r\n\r\nRoute not found\n");
+      self.client.stream.shutdown(Shutdown::Both);
+      self.client.interest = UnixReady::from(Ready::empty());
       ExecutionResult::Close(vec![self.client.index])
     }
   }
@@ -213,12 +226,16 @@ impl Session {
 
     self.client.interest.remove(Ready::readable());
 
-    if self.create_instance(&method, &path) == ExecutionResult::Continue {
-      println!("resuming");
-      self.resume();
+    let res = self.create_instance(&method, &path);
+    match res {
+      ExecutionResult::Continue => {
+        println!("resuming");
+        self.resume();
+        ExecutionResult::Continue
+      },
+      e => e
     }
 
-    ExecutionResult::Continue
   }
 
   fn front_writable(&mut self) -> ExecutionResult {
