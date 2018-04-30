@@ -4,7 +4,8 @@ use slab::Slab;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::iter::repeat;
-use std::net::TcpStream;
+use mio::net::TcpStream;
+use std::net::SocketAddr;
 use std::str;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -12,18 +13,20 @@ use wasmi::memory_units::Pages;
 use wasmi::*;
 use interpreter::Host;
 
-#[derive(Debug, Clone, PartialEq)]
-struct HostErrorWithCode {
-  error_code: u32,
+#[derive(Debug)]
+pub enum AsyncHostError {
+  Connecting(SocketAddr),
+  Read(usize),
+  Write(usize),
 }
 
-impl ::std::fmt::Display for HostErrorWithCode {
+impl ::std::fmt::Display for AsyncHostError {
   fn fmt(&self, f: &mut ::std::fmt::Formatter) -> Result<(), ::std::fmt::Error> {
-    write!(f, "{}", self.error_code)
+    write!(f, "{:?}", self)
   }
 }
 
-impl HostError for HostErrorWithCode {}
+impl HostError for AsyncHostError {}
 
 #[derive(Clone, Debug)]
 pub struct PreparedResponse {
@@ -185,15 +188,19 @@ impl Externals for AsyncHost {
           .get(ptr, sz as usize)
           .unwrap();
         let address = String::from_utf8(v).unwrap();
-        if let Ok(socket) = TcpStream::connect(&address) {
-          if let Ok(fd) = self.inner.borrow_mut().connections.insert(socket) {
-            Ok(Some(RuntimeValue::I32(fd as i32)))
+        let error = AsyncHostError::Connecting(address.parse().unwrap());
+        Err(Trap::new(TrapKind::Host(Box::new(error))))
+        /*if let Ok(socket) = TcpStream::connect(&address.parse().unwrap()) {
+          */
+          /*if let Ok(fd) = self.inner.borrow_mut().connections.insert(socket) {
+            let error = AsyncHostError::Connecting(fd);
+            Err(Trap::new(TrapKind::Host(Box::new(error))))
           } else {
             Ok(Some(RuntimeValue::I32(-2)))
-          }
-        } else {
+          }*/
+        /*} else {
           Ok(Some(RuntimeValue::I32(-1)))
-        }
+        }*/
       }
       TCP_READ => {
         let fd: i32 = args.nth(0);

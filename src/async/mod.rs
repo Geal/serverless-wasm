@@ -1,7 +1,7 @@
 use config::{ApplicationState, Config};
 
 use mio::*;
-use mio::net::TcpListener;
+use mio::net::{TcpListener, TcpStream};
 use mio::unix::UnixReady;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -33,6 +33,7 @@ pub fn server(config: Config) {
 
   loop {
     poll.poll(&mut events, None).unwrap();
+    println!("got events: {:?}", events);
 
     for event in events.iter() {
       match event.token() {
@@ -86,15 +87,40 @@ pub fn server(config: Config) {
     for client_token in ready.drain(..) {
       let mut cont = session::ExecutionResult::Continue;
       if let Some(ref mut client) = connections.get_mut(client_token) {
-        cont = client.borrow_mut().execute(&mut poll);
+        cont = client.borrow_mut().execute();
       } else {
         println!("non existing token {:?} was marked as ready", client_token);
       }
 
-      if let session::ExecutionResult::Close(tokens) = cont {
-        for t in tokens.iter() {
-          connections.remove(client_token);
-        }
+      match cont {
+        session::ExecutionResult::Close(tokens) => {
+          for t in tokens.iter() {
+            connections.remove(client_token);
+          }
+        },
+        session::ExecutionResult::ConnectBackend(address) => {
+          let client = connections.get(client_token).unwrap().clone();
+
+          match connections.vacant_entry() {
+            None => {
+              println!("error: no more room for new connections");
+            }
+            Some(entry) => {
+              let index = entry.index();
+              let stream = TcpStream::connect(&address).unwrap();
+              poll.register(
+                &stream,
+                Token(index + 1),
+                Ready::readable() | Ready::writable() | Ready::from(UnixReady::hup() | UnixReady::error()),
+                PollOpt::edge(),
+              );
+              client.borrow_mut().add_backend(stream, index);
+
+              entry.insert(client);
+            }
+          }
+        },
+        _  => {}
       }
     }
   }

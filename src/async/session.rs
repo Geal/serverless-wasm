@@ -6,19 +6,20 @@ use std::iter::repeat;
 use std::rc::Rc;
 use std::io::{ErrorKind, Read, Write};
 use std::cell::RefCell;
-use std::net::Shutdown;
+use std::net::{SocketAddr, Shutdown};
 
 use interpreter::WasmInstance;
 use super::host;
 use config::ApplicationState;
 use httparse;
-use wasmi::{ExternVal, ImportsBuilder, ModuleInstance};
+use wasmi::{ExternVal, ImportsBuilder, ModuleInstance, TrapKind};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExecutionResult {
   WouldBlock,
   Close(Vec<usize>),
   Continue,
+  ConnectBackend(SocketAddr),
   //Register(usize),
   //Remove(Vec<usize>),
 }
@@ -71,27 +72,58 @@ impl Session {
     }
   }
 
-  pub fn resume(&mut self) {
-    self.instance.as_mut().map(|instance| instance.resume());
-    if self
-      .instance
-      .as_mut()
-      .map(|instance| {
-        println!(
-          "set up response: {:?}",
-          instance.state.borrow().prepared_response
-        );
-        instance
-          .state
-          .borrow()
-          .prepared_response
-          .status_code
-          .is_some() && instance.state.borrow().prepared_response.body.is_some()
-      })
-      .unwrap_or(false)
-    {
-      self.client.interest.insert(Ready::writable());
+  pub fn add_backend(&mut self, stream: TcpStream, index: usize) {
+    let s = Stream {
+      readiness: UnixReady::from(Ready::empty()),
+      interest: UnixReady::from(Ready::writable()) | UnixReady::hup() | UnixReady::error(),
+      stream,
+      index,
+    };
+
+    self.backends.insert(index, s);
+  }
+
+  pub fn resume(&mut self)  -> ExecutionResult {
+    let res = self.instance.as_mut().map(|instance| instance.resume()).unwrap();
+    println!("resume result: {:?}", res);
+    match res {
+      Err(t) => match t.kind() {
+        TrapKind::Host(ref err) => {
+          match err.as_ref().downcast_ref() {
+            Some(host::AsyncHostError::Connecting(address)) => {
+              println!("connecting to backend server: {}", address);
+              return ExecutionResult::ConnectBackend(address.clone());
+            },
+            _ => { panic!("got host error: {:?}", err) }
+          }
+        },
+        _ => {
+          panic!("got trap: {:?}", t);
+        }
+      },
+      Ok(_) => if self
+        .instance
+        .as_mut()
+        .map(|instance| {
+          println!(
+            "set up response: {:?}",
+            instance.state.borrow().prepared_response
+          );
+          instance
+            .state
+            .borrow()
+            .prepared_response
+            .status_code
+            .is_some() && instance.state.borrow().prepared_response.body.is_some()
+        })
+        .unwrap_or(false)
+      {
+        self.client.interest.insert(Ready::writable());
+        return ExecutionResult::Close(vec![self.client.index])
+      }
     }
+
+    ExecutionResult::Continue
   }
 
   pub fn create_instance(&mut self, method: &str, path: &str) -> ExecutionResult {
@@ -151,7 +183,7 @@ impl Session {
     }
   }
 
-  pub fn execute(&mut self, poll: &mut Poll) -> ExecutionResult {
+  pub fn execute(&mut self) -> ExecutionResult {
     loop {
       let front_readiness = self.client.readiness & self.client.interest;
 
@@ -230,8 +262,7 @@ impl Session {
     match res {
       ExecutionResult::Continue => {
         println!("resuming");
-        self.resume();
-        ExecutionResult::Continue
+        self.resume()
       },
       e => e
     }
