@@ -7,12 +7,13 @@ use std::rc::Rc;
 use std::io::{ErrorKind, Read, Write};
 use std::cell::RefCell;
 use std::net::{SocketAddr, Shutdown};
+use slab::Slab;
 
 use interpreter::WasmInstance;
 use super::host;
 use config::ApplicationState;
 use httparse;
-use wasmi::{ExternVal, ImportsBuilder, ModuleInstance, TrapKind};
+use wasmi::{ExternVal, ImportsBuilder, ModuleInstance, TrapKind, RuntimeValue};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExecutionResult {
@@ -24,6 +25,7 @@ pub enum ExecutionResult {
   //Remove(Vec<usize>),
 }
 
+#[derive(Debug)]
 pub struct Stream {
   pub readiness: UnixReady,
   pub interest: UnixReady,
@@ -37,12 +39,23 @@ pub struct Buf {
   len: usize,
 }
 
+#[derive(Debug,Clone,PartialEq)]
+pub enum SessionState {
+  WaitingForRequest,
+  WaitingForBackendConnect(usize),
+  Executing,
+  Done,
+}
+
 pub struct Session {
   client: Stream,
   backends: HashMap<usize, Stream>,
   instance: Option<WasmInstance<host::State, host::AsyncHost>>,
   config: Rc<RefCell<ApplicationState>>,
   buffer: Buf,
+  pub state: Option<SessionState>,
+  method: Option<String>,
+  path: Option<String>,
 }
 
 impl Session {
@@ -81,6 +94,8 @@ impl Session {
     };
 
     self.backends.insert(index, s);
+
+    self.state = Some(SessionState::WaitingForBackendConnect(index));
   }
 
   pub fn resume(&mut self)  -> ExecutionResult {
@@ -91,7 +106,7 @@ impl Session {
         TrapKind::Host(ref err) => {
           match err.as_ref().downcast_ref() {
             Some(host::AsyncHostError::Connecting(address)) => {
-              println!("connecting to backend server: {}", address);
+              println!("returning connect to backend server: {}", address);
               return ExecutionResult::ConnectBackend(address.clone());
             },
             _ => { panic!("got host error: {:?}", err) }
@@ -119,14 +134,16 @@ impl Session {
         .unwrap_or(false)
       {
         self.client.interest.insert(Ready::writable());
-        return ExecutionResult::Close(vec![self.client.index])
+        return ExecutionResult::Continue
       }
     }
 
     ExecutionResult::Continue
   }
 
-  pub fn create_instance(&mut self, method: &str, path: &str) -> ExecutionResult {
+  pub fn create_instance(&mut self) -> ExecutionResult {
+    let method = self.method.as_ref().unwrap();
+    let path = self.path.as_ref().unwrap();
     if let Some((func_name, module, ref opt_env)) = self.config.borrow().route(method, path) {
       let mut env = host::State::new();
       if let Some(h) = opt_env {
@@ -167,13 +184,19 @@ impl Session {
   }
 
   pub fn process_events(&mut self, token: usize, events: Ready) -> bool {
-    println!("token {} got events {:?}", token, events);
+    println!("client[{}]:  token {} got events {:?}", self.client.index, token, events);
     if token == self.client.index {
       self.client.readiness = self.client.readiness | UnixReady::from(events);
 
       self.client.readiness & self.client.interest != UnixReady::from(Ready::empty())
     } else {
       if let Some(ref mut stream) = self.backends.get_mut(&token) {
+        println!("state: {:?}", self.state);
+        if self.state == Some(SessionState::WaitingForBackendConnect(token)) {
+          self.instance.as_mut().map(|instance| instance.add_function_result(RuntimeValue::I32(token as i32)));
+          self.state = Some(SessionState::Executing);
+        }
+
         stream.readiness.insert(UnixReady::from(events));
         stream.readiness & stream.interest != UnixReady::from(Ready::empty())
       } else {
@@ -194,6 +217,11 @@ impl Session {
         }
       }
 
+      let res = self.process();
+      if res != ExecutionResult::Continue {
+        return res;
+      }
+
       if front_readiness.is_writable() {
         let res = self.front_writable();
         if res != ExecutionResult::Continue {
@@ -204,69 +232,98 @@ impl Session {
   }
 
   fn front_readable(&mut self) -> ExecutionResult {
-    println!("[{}] front readable", self.client.index);
-
-    loop {
-      if self.buffer.offset + self.buffer.len == self.buffer.buf.len() {
-        break;
-      }
-
-      match self
-        .client
-        .stream
-        .read(&mut self.buffer.buf[self.buffer.offset + self.buffer.len..])
-      {
-        Ok(0) => {
-          return ExecutionResult::Close(vec![self.client.index]);
+    if self.state == Some(SessionState::WaitingForRequest) {
+      loop {
+        if self.buffer.offset + self.buffer.len == self.buffer.buf.len() {
+          break;
         }
-        Ok(sz) => {
-          self.buffer.len += sz;
-        }
-        Err(e) => {
-          if e.kind() == ErrorKind::WouldBlock {
-            self.client.readiness.remove(Ready::readable());
-            break;
+
+        match self
+          .client
+          .stream
+          .read(&mut self.buffer.buf[self.buffer.offset + self.buffer.len..])
+        {
+          Ok(0) => {
+            return ExecutionResult::Close(vec![self.client.index]);
+          }
+          Ok(sz) => {
+            self.buffer.len += sz;
+          }
+          Err(e) => {
+            if e.kind() == ErrorKind::WouldBlock {
+              self.client.readiness.remove(Ready::readable());
+              break;
+            }
           }
         }
       }
+
+      ExecutionResult::Continue
+    } else {
+      ExecutionResult::Close(vec![self.client.index])
     }
+  }
 
-    let (method, path) = {
-      let mut headers = [httparse::Header {
-        name: "",
-        value: &[],
-      }; 16];
-      let mut req = httparse::Request::new(&mut headers);
-      match req.parse(&self.buffer.buf[self.buffer.offset..self.buffer.len]) {
-        Err(e) => {
-          println!("http parsing error: {:?}", e);
-          return ExecutionResult::Close(vec![self.client.index]);
-        }
-        Ok(httparse::Status::Partial) => {
-          return ExecutionResult::Continue;
-        }
-        Ok(httparse::Status::Complete(sz)) => {
-          self.buffer.offset += sz;
-          println!("got request: {:?}", req);
-          (
-            req.method.unwrap().to_string(),
-            req.path.unwrap().to_string(),
-          )
-        }
-      }
-    };
+  fn process(&mut self) -> ExecutionResult {
+    println!("[{}] process", self.client.index);
 
-    self.client.interest.remove(Ready::readable());
+    let state = self.state.take().unwrap();
+    match state {
+      SessionState::WaitingForRequest => {
 
-    let res = self.create_instance(&method, &path);
-    match res {
-      ExecutionResult::Continue => {
+        let (method, path) = {
+          let mut headers = [httparse::Header {
+            name: "",
+            value: &[],
+          }; 16];
+          let mut req = httparse::Request::new(&mut headers);
+          match req.parse(&self.buffer.buf[self.buffer.offset..self.buffer.len]) {
+            Err(e) => {
+              println!("http parsing error: {:?}", e);
+              self.state = Some(SessionState::WaitingForRequest);
+              return ExecutionResult::Close(vec![self.client.index]);
+            }
+            Ok(httparse::Status::Partial) => {
+              self.state = Some(SessionState::WaitingForRequest);
+              return ExecutionResult::Continue;
+            }
+            Ok(httparse::Status::Complete(sz)) => {
+              self.buffer.offset += sz;
+              println!("got request: {:?}", req);
+              (
+                req.method.unwrap().to_string(),
+                req.path.unwrap().to_string(),
+              )
+            }
+          }
+        };
+
+        self.client.interest.remove(Ready::readable());
+        self.method = Some(method);
+        self.path   = Some(path);
+        self.state  = Some(SessionState::Executing);
+        ExecutionResult::Continue
+      },
+      SessionState::Executing => {
+        if self.instance.is_none() {
+          let res = self.create_instance();
+          if res != ExecutionResult::Continue {
+            self.state = Some(SessionState::Executing);
+            return res;
+          }
+        }
+
         println!("resuming");
+        self.state = Some(SessionState::Executing);
         self.resume()
       },
-      e => e
+      SessionState::WaitingForBackendConnect(_) => {
+        panic!("should not have called execute() in WaitingForBackendConnect");
+      },
+      SessionState::Done => {
+        panic!("done");
+      }
     }
-
   }
 
   fn front_writable(&mut self) -> ExecutionResult {

@@ -2,7 +2,7 @@ use parity_wasm;
 use parity_wasm::elements::{External, FunctionType, Internal, Type, ValueType};
 use std::collections::VecDeque;
 use wasmi::{self, Module};
-use wasmi::{BlockFrameType, Externals, FuncInstance, FuncRef, FunctionContext, Interpreter, RunResult, RuntimeValue, Trap};
+use wasmi::{BlockFrameType, Externals, FuncInstance, FuncRef, FunctionContext, Interpreter, RunResult, RuntimeValue, Trap, TrapKind};
 use std::marker;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -41,7 +41,17 @@ impl<S, E: Externals + Host<State = S>> WasmInstance<S, E> {
     let mut host = E::build(self.state.clone());
     let mut interpreter = Interpreter::new(&mut host);
 
+    println!("WasmInstance::resume: stack\n{:?}", self.stack);
     my_run_interpreter_loop(&mut interpreter, &mut self.stack)
+  }
+
+  pub fn add_function_result(&mut self, return_value: RuntimeValue) {
+    self.stack.back_mut().map(|function_context| {
+      function_context.value_stack_mut().push(return_value).expect("should have pushed the return value");
+      println!("adding return value to {:?} initialized: {}",
+        function_context.function, function_context.is_initialized);
+    });
+    println!("added function result {:?}, stack len:{}", return_value, self.stack.len());
   }
 }
 
@@ -102,14 +112,28 @@ where
         None => return Ok(return_value),
       },
       RunResult::NestedCall(nested_func) => {
-        //println!("calling nested func");
-        match FuncInstance::invoke_context(&nested_func, &mut function_context, interpreter.externals)? {
-          None => {
+        println!("calling nested func, stack len={}", function_stack.len());
+        match FuncInstance::invoke_context(&nested_func, &mut function_context, interpreter.externals) {
+          Err(t) => {
+            if let TrapKind::Host(_) = t.kind() {
+              //function_context.value_stack_mut().push(RuntimeValue::I32(42)).expect("should have pushed the return value");
+              let initialized = function_context.is_initialized;
+              function_stack.push_back(function_context);
+              println!("got host trapkind, stack len={}, initialized: {}", function_stack.len(), initialized);
+              return Err(t);
+            } else {
+              println!("resume got error: {:?}", t);
+              return Err(t);
+            }
+          },
+          Ok(None) => {
             function_stack.push_back(function_context);
+            println!("got ok(none) stack len={}", function_stack.len());
           }
-          Some(nested_context) => {
+          Ok(Some(nested_context)) => {
             function_stack.push_back(function_context);
             function_stack.push_back(nested_context);
+            println!("got ok(some(nested_context)) stack len={}", function_stack.len());
           }
         }
       }
