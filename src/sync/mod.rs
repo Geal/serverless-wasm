@@ -1,5 +1,7 @@
 use rouille;
 use wasmi::{Error, ExternVal, ImportsBuilder, ModuleInstance};
+use std::rc::Rc;
+use std::cell::RefCell;
 
 use config::{ApplicationState, Config};
 use interpreter::WasmInstance;
@@ -24,7 +26,7 @@ pub fn server(config: Config) {
 
       let mut response = env.prepared_response.clone();
       if let Some(ExternVal::Func(func_ref)) = main.export_by_name(func_name) {
-        let mut instance: WasmInstance<host::State, host::SyncHost> = WasmInstance::new(env, &func_ref, &[]);
+        let mut instance: WasmInstance<host::State, host::SyncHost> = WasmInstance::new(Rc::new(RefCell::new(env)), &func_ref, &[]);
         let res = instance.resume().map_err(|t| Error::Trap(t));
         println!("invocation result: {:?}", res);
         response = instance.state.borrow().prepared_response.clone();

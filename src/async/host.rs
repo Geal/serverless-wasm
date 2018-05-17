@@ -16,8 +16,8 @@ use interpreter::Host;
 #[derive(Debug)]
 pub enum AsyncHostError {
   Connecting(SocketAddr),
-  Read(usize),
-  Write(usize),
+  TcpRead(i32, u32, u64),
+  TcpWrite(i32, u32, u64, usize),
 }
 
 impl ::std::fmt::Display for AsyncHostError {
@@ -64,6 +64,18 @@ impl State {
     }
   }
 }
+impl State {
+  pub fn get_buf(&mut self, ptr: u32, size: usize) -> Option<Vec<u8>> {
+    self.memory.as_ref().and_then(|mref| {
+      mref.get(ptr, size).map_err(|e| println!("get buf error: {:?}", e)).ok()
+    })
+  }
+
+  pub fn write_buf(&mut self, ptr: u32, data: &[u8]) {
+    self.memory.as_ref().map(|m| m.set(ptr, data));
+  }
+}
+
 
 pub struct AsyncHost {
   pub inner: Rc<RefCell<State>>,
@@ -188,24 +200,19 @@ impl Externals for AsyncHost {
           .get(ptr, sz as usize)
           .unwrap();
         let address = String::from_utf8(v).unwrap();
+        println!("received tcp_connect for {:?}", address);
         let error = AsyncHostError::Connecting(address.parse().unwrap());
         Err(Trap::new(TrapKind::Host(Box::new(error))))
-        /*if let Ok(socket) = TcpStream::connect(&address.parse().unwrap()) {
-          */
-          /*if let Ok(fd) = self.inner.borrow_mut().connections.insert(socket) {
-            let error = AsyncHostError::Connecting(fd);
-            Err(Trap::new(TrapKind::Host(Box::new(error))))
-          } else {
-            Ok(Some(RuntimeValue::I32(-2)))
-          }*/
-        /*} else {
-          Ok(Some(RuntimeValue::I32(-1)))
-        }*/
       }
       TCP_READ => {
         let fd: i32 = args.nth(0);
         let ptr: u32 = args.nth(1);
         let sz: u64 = args.nth(2);
+
+        let error = AsyncHostError::TcpRead(fd, ptr, sz);
+        Err(Trap::new(TrapKind::Host(Box::new(error))))
+
+        /*
         let mut v = Vec::with_capacity(sz as usize);
         v.extend(repeat(0).take(sz as usize));
 
@@ -217,12 +224,17 @@ impl Externals for AsyncHost {
         } else {
           Ok(Some(RuntimeValue::I64(-1)))
         }
+        */
       }
       TCP_WRITE => {
         let fd: i32 = args.nth(0);
         let ptr: u32 = args.nth(1);
         let sz: u64 = args.nth(2);
 
+        let error = AsyncHostError::TcpWrite(fd, ptr, sz, 0);
+        Err(Trap::new(TrapKind::Host(Box::new(error))))
+
+        /*
         let buf = self
           .inner
           .borrow()
@@ -237,6 +249,7 @@ impl Externals for AsyncHost {
         } else {
           Ok(Some(RuntimeValue::I64(-1)))
         }
+        */
       }
       DB_GET => {
         let key_ptr: u32 = args.nth(0);

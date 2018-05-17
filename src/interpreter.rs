@@ -27,11 +27,11 @@ pub struct WasmInstance<S, E: Externals + Host<State = S>> {
 }
 
 impl<S, E: Externals + Host<State = S>> WasmInstance<S, E> {
-  pub fn new(state: S, func_ref: &FuncRef, args: &[RuntimeValue]) -> WasmInstance<S, E> {
+  pub fn new(state: Rc<RefCell<S>>, func_ref: &FuncRef, args: &[RuntimeValue]) -> WasmInstance<S, E> {
     let stack = create_stack(&func_ref, args);
 
     WasmInstance {
-      state: Rc::new(RefCell::new(state)),
+      state: state,
       stack,
       _marker: marker::PhantomData,
     }
@@ -112,14 +112,13 @@ where
         None => return Ok(return_value),
       },
       RunResult::NestedCall(nested_func) => {
-        println!("calling nested func, stack len={}", function_stack.len());
+        //println!("calling nested func, stack len={}", function_stack.len());
         match FuncInstance::invoke_context(&nested_func, &mut function_context, interpreter.externals) {
           Err(t) => {
             if let TrapKind::Host(_) = t.kind() {
               //function_context.value_stack_mut().push(RuntimeValue::I32(42)).expect("should have pushed the return value");
-              let initialized = function_context.is_initialized;
               function_stack.push_back(function_context);
-              println!("got host trapkind, stack len={}, initialized: {}", function_stack.len(), initialized);
+              println!("got host trapkind");
               return Err(t);
             } else {
               println!("resume got error: {:?}", t);
@@ -128,12 +127,12 @@ where
           },
           Ok(None) => {
             function_stack.push_back(function_context);
-            println!("got ok(none) stack len={}", function_stack.len());
+            //println!("got ok(none) stack len={}", function_stack.len());
           }
           Ok(Some(nested_context)) => {
             function_stack.push_back(function_context);
             function_stack.push_back(nested_context);
-            println!("got ok(some(nested_context)) stack len={}", function_stack.len());
+            //println!("got ok(some(nested_context)) stack len={}", function_stack.len());
           }
         }
       }

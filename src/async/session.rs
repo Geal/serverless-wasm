@@ -43,6 +43,8 @@ pub struct Buf {
 pub enum SessionState {
   WaitingForRequest,
   WaitingForBackendConnect(usize),
+  TcpRead(i32, u32, usize),
+  TcpWrite(i32, Vec<u8>, usize),
   Executing,
   Done,
 }
@@ -56,6 +58,7 @@ pub struct Session {
   pub state: Option<SessionState>,
   method: Option<String>,
   path: Option<String>,
+  env: Option<Rc<RefCell<host::State>>>,
 }
 
 impl Session {
@@ -82,6 +85,10 @@ impl Session {
       instance: None,
       config,
       buffer,
+      state: Some(SessionState::WaitingForRequest),
+      method: None,
+      path: None,
+      env: None,
     }
   }
 
@@ -108,6 +115,17 @@ impl Session {
             Some(host::AsyncHostError::Connecting(address)) => {
               println!("returning connect to backend server: {}", address);
               return ExecutionResult::ConnectBackend(address.clone());
+            },
+            Some(host::AsyncHostError::TcpWrite(fd, ptr, sz, written)) => {
+              self.backends.get_mut(&(*fd as usize)).map(|backend| backend.interest.insert(UnixReady::from(Ready::writable())));
+              let buf = self.env.as_mut().and_then(|env| env.borrow_mut().get_buf(*ptr, *sz as usize)).unwrap();
+              self.state = Some(SessionState::TcpWrite(*fd, buf, *written));
+              return ExecutionResult::Continue;
+            },
+            Some(host::AsyncHostError::TcpRead(fd, ptr, sz)) => {
+              self.backends.get_mut(&(*fd as usize)).map(|backend| backend.interest.insert(UnixReady::from(Ready::readable())));
+              self.state = Some(SessionState::TcpRead(*fd, *ptr, *sz as usize));
+              return ExecutionResult::Continue;
             },
             _ => { panic!("got host error: {:?}", err) }
           }
@@ -153,7 +171,10 @@ impl Session {
         );
       }
 
-      let main = ModuleInstance::new(&module, &ImportsBuilder::new().with_resolver("env", &env))
+      let env = Rc::new(RefCell::new(env));
+      self.env = Some(env.clone());
+
+      let main = ModuleInstance::new(&module, &ImportsBuilder::new().with_resolver("env", &*env.borrow()))
         .expect("Failed to instantiate module")
         .assert_no_start();
 
@@ -217,17 +238,18 @@ impl Session {
         }
       }
 
-      let res = self.process();
-      if res != ExecutionResult::Continue {
-        return res;
-      }
-
       if front_readiness.is_writable() {
         let res = self.front_writable();
         if res != ExecutionResult::Continue {
           return res;
         }
       }
+
+      let res = self.process();
+      if res != ExecutionResult::Continue {
+        return res;
+      }
+
     }
   }
 
@@ -316,6 +338,109 @@ impl Session {
         println!("resuming");
         self.state = Some(SessionState::Executing);
         self.resume()
+      },
+      SessionState::TcpRead(fd, ptr, sz) => {
+        let readiness = self.backends[&(fd as usize)].readiness & self.backends[&(fd as usize)].interest;
+        println!("tcpread({}): readiness: {:?}", fd, readiness);
+        if readiness.is_readable() {
+          let mut buffer = Vec::with_capacity(sz as usize);
+          buffer.extend(repeat(0).take(sz as usize));
+          let mut read = 0usize;
+
+          loop {
+            match self.backends.get_mut(&(fd as usize)).unwrap().stream.read(&mut buffer[read..]) {
+              Ok(0) => {
+                println!("read 0");
+                self.backends.get_mut(&(fd as usize)).map(|backend| backend.readiness.remove(Ready::readable()));
+                self.env.as_mut().map(|env| env.borrow_mut().write_buf(ptr, &buffer[..read]));
+                self.instance.as_mut().map(|instance| instance.add_function_result(RuntimeValue::I64(read as i64)));
+                self.state = Some(SessionState::Executing);
+                return ExecutionResult::Continue;
+              },
+              Ok(sz) => {
+                read += sz;
+                println!("read {} bytes", read);
+
+                if read == sz {
+                  //FIXME: return result
+                  self.env.as_mut().map(|env| env.borrow_mut().write_buf(ptr, &buffer[..read]));
+                  self.instance.as_mut().map(|instance| instance.add_function_result(RuntimeValue::I64(read as i64)));
+                  self.state = Some(SessionState::Executing);
+                  return ExecutionResult::Continue;
+                }
+              },
+              Err(e) => match e.kind() {
+                ErrorKind::WouldBlock => {
+                  println!("wouldblock");
+                  self.backends.get_mut(&(fd as usize)).map(|backend| backend.readiness.remove(Ready::readable()));
+                  self.env.as_mut().map(|env| env.borrow_mut().write_buf(ptr, &buffer[..read]));
+                  self.instance.as_mut().map(|instance| instance.add_function_result(RuntimeValue::I64(read as i64)));
+                  self.state = Some(SessionState::Executing);
+                  return ExecutionResult::Continue;
+                },
+                e => {
+                  println!("backend socket error: {:?}", e);
+                  self.instance.as_mut().map(|instance| instance.add_function_result(RuntimeValue::I64(-1)));
+                  self.state = Some(SessionState::Executing);
+                  //FIXME
+                  return ExecutionResult::Continue;
+                }
+              }
+            }
+          }
+        } else {
+          self.state = Some(SessionState::TcpRead(fd, ptr, sz));
+          ExecutionResult::WouldBlock
+        }
+      },
+      SessionState::TcpWrite(fd, buffer, mut written) => {
+        let readiness = self.backends[&(fd as usize)].readiness & self.backends[&(fd as usize)].interest;
+        if readiness.is_writable() {
+          loop {
+            match self.backends.get_mut(&(fd as usize)).unwrap().stream.write(&buffer[written..]) {
+              Ok(0) => {
+                self.backends.get_mut(&(fd as usize)).map(|backend| backend.readiness.remove(Ready::writable()));
+                self.instance.as_mut().map(|instance| instance.add_function_result(RuntimeValue::I64(written as i64)));
+                self.state = Some(SessionState::Executing);
+                return ExecutionResult::Continue;
+              },
+              Ok(sz) => {
+                written += sz;
+                println!("wrote {} bytes", sz);
+
+                if written == buffer.len() {
+                  //FIXME: return result
+                  self.state = Some(SessionState::Executing);
+                  self.instance.as_mut().map(|instance| instance.add_function_result(RuntimeValue::I64(written as i64)));
+                  return ExecutionResult::Continue;
+                }
+              },
+              Err(e) => match e.kind() {
+                ErrorKind::WouldBlock => {
+                  println!("wouldblock");
+                  self.backends.get_mut(&(fd as usize)).map(|backend| backend.readiness.remove(Ready::writable()));
+                  self.state = Some(SessionState::TcpWrite(fd, buffer, written));
+                  return ExecutionResult::Continue;
+                },
+                e => {
+                  println!("backend socket error: {:?}", e);
+                  self.instance.as_mut().map(|instance| instance.add_function_result(RuntimeValue::I64(-1)));
+                  self.state = Some(SessionState::Executing);
+                  //FIXME
+                  return ExecutionResult::Continue;
+                }
+              }
+            }
+          }
+
+        } else {
+          self.state = Some(SessionState::TcpWrite(fd, buffer, written));
+          ExecutionResult::WouldBlock
+        }
+
+
+        //FIXME: handle error and hup
+
       },
       SessionState::WaitingForBackendConnect(_) => {
         panic!("should not have called execute() in WaitingForBackendConnect");
