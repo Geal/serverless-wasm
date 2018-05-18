@@ -173,8 +173,9 @@ impl Session {
 
       let env = Rc::new(RefCell::new(env));
       self.env = Some(env.clone());
+      let resolver = host::StateResolver { inner: env.clone() };
 
-      let main = ModuleInstance::new(&module, &ImportsBuilder::new().with_resolver("env", &*env.borrow()))
+      let main = ModuleInstance::new(&module, &ImportsBuilder::new().with_resolver("env", &resolver))
         .expect("Failed to instantiate module")
         .assert_no_start();
 

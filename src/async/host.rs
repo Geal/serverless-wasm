@@ -57,7 +57,7 @@ pub struct State {
 impl State {
   pub fn new() -> State {
     State {
-      memory: Some(MemoryInstance::alloc(Pages(3), Some(Pages(10))).unwrap()),
+      memory: None,//Some(MemoryInstance::alloc(Pages(3), Some(Pages(100))).unwrap()),
       instance: None,
       prepared_response: PreparedResponse::new(),
       connections: Slab::with_capacity(100),
@@ -372,5 +372,44 @@ impl ModuleImportResolver for State {
     let res = self.memory.as_ref().unwrap().clone();
 
     Ok(res)
+  }
+}
+
+pub struct StateResolver {
+  pub inner: Rc<RefCell<State>>,
+}
+
+impl ModuleImportResolver for StateResolver {
+  fn resolve_func(&self, field_name: &str, signature: &Signature) -> Result<FuncRef, Error> {
+    let index = match field_name {
+      "log" => LOG_INDEX,
+      "response_set_status_line" => RESPONSE_SET_STATUS_LINE,
+      "response_set_header" => RESPONSE_SET_HEADER,
+      "response_set_body" => RESPONSE_SET_BODY,
+      "tcp_connect" => TCP_CONNECT,
+      "tcp_read" => TCP_READ,
+      "tcp_write" => TCP_WRITE,
+      "db_get" => DB_GET,
+      _ => {
+        return Err(Error::Instantiation(format!(
+          "Export {} not found",
+          field_name
+        )))
+      }
+    };
+
+    if !self.inner.borrow().check_signature(index, signature) {
+      return Err(Error::Instantiation(format!(
+        "Export `{}` doesnt match expected type {:?}",
+        field_name, signature
+      )));
+    }
+
+    Ok(FuncInstance::alloc_host(signature.clone(), index))
+  }
+
+  fn resolve_memory(&self, _field_name: &str, _memory_type: &MemoryDescriptor) -> Result<MemoryRef, Error> {
+    self.inner.borrow_mut().memory = Some(MemoryInstance::alloc(Pages(_memory_type.initial() as usize), Some(Pages(100))).unwrap());
+    Ok(self.inner.borrow().memory.as_ref().unwrap().clone())
   }
 }
