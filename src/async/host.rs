@@ -32,6 +32,7 @@ impl HostError for AsyncHostError {}
 #[derive(Clone, Debug)]
 pub struct PreparedResponse {
   pub status_code: Option<u16>,
+  pub reason: Option<String>,
   pub headers: Vec<(String, String)>,
   pub body: Option<Vec<u8>>,
 }
@@ -40,6 +41,7 @@ impl PreparedResponse {
   pub fn new() -> PreparedResponse {
     PreparedResponse {
       status_code: None,
+      reason: None,
       headers: Vec::new(),
       body: None,
     }
@@ -128,7 +130,7 @@ impl Externals for AsyncHost {
         let ptr: u32 = args.nth(1);
         let sz: u64 = args.nth(2);
 
-        let _reason = self
+        let reason = self
           .inner
           .borrow()
           .memory
@@ -138,6 +140,7 @@ impl Externals for AsyncHost {
           .unwrap();
 
         self.inner.borrow_mut().prepared_response.status_code = Some(status as u16);
+        self.inner.borrow_mut().prepared_response.reason = Some(String::from_utf8(reason).unwrap());
 
         Ok(None)
       }

@@ -188,7 +188,7 @@ impl Session {
         self
           .client
           .stream
-          .write(b"404 Not Found\r\nContent-length: 19\r\n\r\nFunction not found\n");
+          .write(b"HTTP/1.1 404 Not Found\r\nContent-length: 19\r\n\r\nFunction not found\n");
         self.client.stream.shutdown(Shutdown::Both);
         self.client.interest = UnixReady::from(Ready::empty());
         ExecutionResult::Close(vec![self.client.index])
@@ -198,7 +198,7 @@ impl Session {
       self
         .client
         .stream
-        .write(b"404 Not Found\r\nContent-length: 16\r\n\r\nRoute not found\n");
+        .write(b"HTTP/1.1 404 Not Found\r\nContent-length: 16\r\n\r\nRoute not found\n");
       self.client.stream.shutdown(Shutdown::Both);
       self.client.interest = UnixReady::from(Ready::empty());
       ExecutionResult::Close(vec![self.client.index])
@@ -463,7 +463,7 @@ impl Session {
     self
       .client
       .stream
-      .write_fmt(format_args!("{} Reason\r\n", response.status_code.unwrap()));
+      .write_fmt(format_args!("HTTP/1.1 {} {}\r\n", response.status_code.unwrap(), response.reason.unwrap()));
     for header in response.headers.iter() {
       self
         .client
