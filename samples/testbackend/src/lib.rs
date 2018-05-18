@@ -1,87 +1,52 @@
-use std::ptr;
 use std::str;
-
-extern {
-  fn log(ptr: *const u8, size: u64);
-  fn response_set_status_line(status: u32, ptr: *const u8, size: u64);
-  fn response_set_header(name_ptr: *const u8, name_size: u64, value_ptr: *const u8, value_size: u64);
-  fn response_set_body(ptr: *const u8, size: u64);
-  fn tcp_connect(ptr: *const u8, size: u64) -> i32;
-  fn tcp_read(fd: i32, ptr: *mut u8, size: u64) -> i64;
-  fn tcp_write(fd: i32, ptr: *const u8, size: u64) -> i64;
-  fn db_get(key_ptr: *const u8, key_size: u64, value_ptr: *const u8, value_size: u64) -> i64;
-}
-
+extern crate serverless_api as api;
 
 #[no_mangle]
 pub extern "C" fn handle() {
-  let s = b"Hello world!";
-  unsafe { log(s.as_ptr(), s.len() as u64) };
+  api::log("Hello world with api!");
+  let body;
 
-  let status = 200;
-  let reason = "Ok";
-  unsafe {
-    response_set_status_line(status, reason.as_ptr(), reason.len() as u64);
-  };
+  let key = "/env/backend";
+  match api::db::get(key) {
+    None => {
+      body = format!("could not get value for key {}", key);
+    },
+    Some(address) => {
+      api::log(&format!("connecting to backend at {}", address));
 
-  let mut body = String::new();
+      match api::TcpStream::connect(&address) {
+        None => {
+          body = "could not connect to backend".to_string();
+        },
+        Some(mut socket) => {
+          match socket.write(b"hello\n") {
+            None => {
+              body = "could not write to backend server".to_string();
+            },
+            Some(_) => {
+              let mut res: [u8; 100] = [0u8; 100];
+              match socket.read(&mut res) {
+                None => {
+                  body = "could not read from backend server".to_string();
+                },
+                Some(sz) => {
+                  api::log(&format!("read data from backend: \"{:?}\"", str::from_utf8(&res[..sz]).unwrap()));
 
-  let addr_key = b"/env/backend";
-  let mut addr: [u8; 100] = [0u8; 100];
-  let read_sz = unsafe { db_get(addr_key.as_ptr(), addr_key.len() as u64, addr.as_mut_ptr(), addr.len() as u64) };
-  if read_sz < 0 {
-    let body = format!("could not get value for key {}", str::from_utf8(addr_key).unwrap());
-    unsafe { log(body.as_ptr(), body.len() as u64) };
-
-    let header_name = "Content-length";
-    let header_value = body.len().to_string();
-
-    unsafe {
-      response_set_header(header_name.as_ptr(), header_name.len() as u64, header_value.as_ptr(), header_value.len() as u64);
-    };
-
-    unsafe {
-      response_set_body(body.as_ptr(), body.len() as u64);
-    }
-    return;
-  }
-  //let addr = "127.0.0.1:8181";
-  let backend = unsafe { tcp_connect(addr.as_ptr(), read_sz as u64) };
-
-  if backend == -1 {
-    body = format!("could not connect to backend address: {:?}\n", str::from_utf8(&addr[..read_sz as usize]));
-    unsafe { log(body.as_ptr(), body.len() as u64) };
-  } else {
-    let backend_msg = "hello\n";
-    let write_sz = unsafe { tcp_write(backend, backend_msg.as_ptr(), backend_msg.len() as u64) };
-
-    if write_sz == -1 {
-      body = String::from("could not write to backend server");
-      unsafe { log(body.as_ptr(), body.len() as u64) };
-    } else {
-      let mut res: [u8; 100] = [0u8; 100];
-      let read_sz = unsafe { tcp_read(backend, res.as_mut_ptr(), res.len() as u64) };
-
-      if read_sz == -1 {
-        body = String::from("could not read from backend server");
-        unsafe { log(body.as_ptr(), body.len() as u64) };
-      } else {
-        let message = format!("read {} bytes from backend", read_sz);
-        unsafe { log(message.as_ptr(), message.len() as u64) };
-
-        body = format!("Hello world from wasm!\nanswer from backend:\n{}\n", str::from_utf8(&res[..]).unwrap());
+                  body = format!("Hello world from wasm!\nanswer from backend:\n{}\n", str::from_utf8(&res[..sz]).unwrap());
+                  api::response::set_status(200, "Ok");
+                  api::response::set_header("Content-length", &body.len().to_string());
+                  api::response::set_body(body.as_bytes());
+                }
+              }
+            }
+          }
+        }
       }
     }
   }
 
-  let header_name = "Content-length";
-  let header_value = body.len().to_string();
-
-  unsafe {
-    response_set_header(header_name.as_ptr(), header_name.len() as u64, header_value.as_ptr(), header_value.len() as u64);
-  };
-
-  unsafe {
-    response_set_body(body.as_ptr(), body.len() as u64);
-  }
+  api::log(&body);
+  api::response::set_status(500, "Server error");
+  api::response::set_header("Content-length", &body.len().to_string());
+  api::response::set_body(body.as_bytes());
 }

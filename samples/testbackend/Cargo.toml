@@ -8,3 +8,4 @@ path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
+serverless-api = { path = "../../serverless-api/" }
