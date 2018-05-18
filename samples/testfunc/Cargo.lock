@@ -1,4 +1,11 @@
 [[package]]
+name = "serverless-api"
+version = "0.1.0"
+
+[[package]]
 name = "testfunc"
 version = "0.1.0"
+dependencies = [
+ "serverless-api 0.1.0",
+]
 
