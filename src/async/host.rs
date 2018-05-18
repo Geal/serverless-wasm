@@ -7,6 +7,7 @@ use std::iter::repeat;
 use mio::net::TcpStream;
 use std::net::SocketAddr;
 use std::str;
+use std::cmp;
 use std::rc::Rc;
 use std::cell::RefCell;
 use wasmi::memory_units::Pages;
@@ -271,17 +272,14 @@ impl Externals for AsyncHost {
         match self.inner.borrow().db.get(&key) {
           None => Ok(Some(RuntimeValue::I64(-1))),
           Some(value) => {
-            if value.len() > value_sz as usize {
-              Ok(Some(RuntimeValue::I64(-2)))
-            } else {
-              self
-                .inner
-                .borrow()
-                .memory
-                .as_ref()
-                .map(|m| m.set(value_ptr, value.as_bytes()));
-              Ok(Some(RuntimeValue::I64(value.len() as i64)))
-            }
+            let to_write = cmp::min(value.len(), value_sz as usize);
+            self
+              .inner
+              .borrow()
+              .memory
+              .as_ref()
+              .map(|m| m.set(value_ptr, (&value[..to_write]).as_bytes()));
+            Ok(Some(RuntimeValue::I64(value.len() as i64)))
           }
         }
       }
