@@ -108,11 +108,11 @@ cargo build && ./target/debug/serverless-wasm ./samples/config.toml
 - [x] API to build a response from WASM
 - [x] (blocking) TCP connections to backend servers or databases
 - [x] routing to mutiple apps depending on the request
+- [x] set up initial state via "environment variables"
 - [ ] proper error handling (the server will panic even if you give it the side eye)
-- [ ] asynchronous event loop to receive connections and handle backend TCP connections
+- [ ] (in progress) asynchronous event loop to receive connections and handle backend TCP connections
 - [ ] file system abstraction (loading files from S3 or other providers?)
-- [ ] set up initial state via "environment variables"
-- [ ] "standard API" for functions exported by the VM
+- [ ] (in progress) "standard API" for functions exported by the VM
 
 ## Prior art
 
