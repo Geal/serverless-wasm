@@ -18,3 +18,7 @@ httparse = "^1.2"
 #wasmi = "^0.1"
 wasmi = { git = "https://github.com/geal/wasmi" }
 #wasmi = { path = "../wasmi" }
+cretonne = "*"
+cretonne-wasm = "^0.8"
+cretonne-module = "*"
+cretonne-simplejit = "^0.8"

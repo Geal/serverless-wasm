@@ -5,6 +5,10 @@ extern crate rouille;
 extern crate slab;
 extern crate toml;
 extern crate wasmi;
+extern crate cretonne;
+extern crate cretonne_wasm;
+extern crate cretonne_module;
+extern crate cretonne_simplejit;
 
 #[macro_use]
 extern crate serde_derive;
@@ -15,6 +19,7 @@ mod async;
 mod config;
 mod interpreter;
 mod sync;
+mod jit;
 
 fn main() {
   let args: Vec<_> = args().collect();
